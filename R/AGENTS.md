@@ -97,3 +97,4 @@
 4. **`aggregate_ci()` 与 `Mortality(uncertain = TRUE)` 的边界**：前者要求调用方自带 `_MEAN/_UP/_LOW` 后缀，后者直接给区间；若将来让 `Mortality()` 一次输出三支并加后缀，需明确两者分工。
 5. **独立误差口径**：若需要「每格误差独立」的抽样区间，可增加 `ci_method = "quadrature"`（现有 range 口径为共模假设）。
 6. **vignette 未写**：`vignettes/` 为空，除 README 外没有教程。
+7. **JSON C-R 配置迁移（进行中）**：把 PM2.5-attr-mort v5 的“模型名 → JSON 元数据 → 查表”机制移植进 AttrMort，替换 `.CR_TABLE_REGISTRY`、`RR_std()` 的硬编码 reshape 分支与 `.CR_ENDPOINTS`。设计见 `diagnosis/design_json_crf_migration_260930.md`（分支 `refactor/json-crf-migration`）；待拍板口径（查表载体、越界浓度、LRI 年龄等）确认后按 P0–P4 实施，完成后删除本条。
