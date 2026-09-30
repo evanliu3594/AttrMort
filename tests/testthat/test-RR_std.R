@@ -75,3 +75,33 @@ describe("cr_models()", {
     expect_true(all(c("GEMM", "IER", "MRBRT", "O3", "NO2") %in% cr_models()))
   })
 })
+
+describe("built-in lookup tables", {
+  it("store conc keys as character at one decimal place", {
+    # The data contract applies to the shipped tables themselves, not only to
+    # what RR_std() renders: NO2 used to be a double column with ~1e-12
+    # floating-point tail, which matchable() happened to paper over.
+    tables <- c(
+      "GEMM_Lookup_Table", "IER2010_Lookup_Table", "IER2013_Lookup_Table",
+      "IER2015_Lookup_Table", "IER2017_Lookup_Table", "MRBRT2019_Lookup_Table",
+      "MRBRT2021_Lookup_Table", "O3_CR_Lookup_Table", "NO2_CR_Lookup_Table"
+    )
+    for (nm in tables) {
+      e <- new.env()
+      utils::data(list = nm, package = "AttrMort", envir = e)
+      tab <- get(nm, envir = e)
+      for (branch in c("MEAN", "LOW", "UP")) {
+        conc <- tab[[branch]]$conc
+        expect_type(conc, "character")
+        expect_true(all(grepl("^-?[0-9]+([.][0-9])?$", conc)),
+                    info = paste(nm, branch))
+        # stored in numeric order, so consuming the table row-wise cannot
+        # silently read a lexicographic sequence like "1.9", "10", "10.1"
+        expect_false(is.unsorted(as.numeric(conc)),
+                     info = paste(nm, branch))
+      }
+      expect_true(is.list(tab), info = nm)
+      expect_false(inherits(tab, "vctrs_list_of"), info = nm)
+    }
+  })
+})

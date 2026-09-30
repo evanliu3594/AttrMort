@@ -5,7 +5,9 @@
 \alias{IER2017_Lookup_Table}
 \title{the IER C-R curves by GBD2017.}
 \format{
-list
+A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
+  wide tibble: a character \code{conc} column rendered at one decimal place
+  plus one column per \code{endpoint_age} stratum.
 }
 \usage{
 IER2017_Lookup_Table
