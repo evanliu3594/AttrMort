@@ -1,0 +1,77 @@
+# Tests for RR_std() — concentration-response lookup standardisation
+
+describe("RR_std()", {
+  it("returns a join-ready long table with character conc keys", {
+    out <- RR_std("GEMM", "MEAN")
+    expect_s3_class(out, "data.frame")
+    expect_equal(names(out), c("conc", "endpoint", "age", "RR"))
+    expect_type(out$conc, "character")
+    expect_type(out$age, "character")
+    expect_gt(nrow(out), 0)
+  })
+
+  it("keeps the conc keys at the requested precision", {
+    d1 <- RR_std("GEMM", "MEAN", dgt = 1)$conc
+    expect_true(all(grepl("^[0-9]+(\\.[0-9])?$", d1)))
+    expect_equal(RR_std("GEMM", "MEAN", dgt = 0)$conc,
+                 matchable(as.numeric(d1), 0))
+    expect_equal(RR_std("GEMM", "MEAN", dgt = 2)$conc,
+                 matchable(as.numeric(d1), 2))
+  })
+
+  it("matches model names case-insensitively", {
+    expect_equal(RR_std("gemm", "MEAN"), RR_std("GEMM", "MEAN"))
+  })
+
+  it("accepts CI aliases and rejects anything else", {
+    expect_equal(RR_std("GEMM", "UPPER"), RR_std("GEMM", "UP"))
+    expect_equal(RR_std("GEMM", "lower"), RR_std("GEMM", "LOW"))
+    expect_error(RR_std("GEMM", "MEANING"), "must be one of")
+  })
+
+  it("rejects an unknown model with the list of valid names", {
+    expect_error(RR_std("UNKNOWN_MODEL"), "Unknown CR model")
+    expect_error(RR_std("UNKNOWN_MODEL"), "MRBRT")
+  })
+
+  it("formats NCD+LRI for ages 25 and above", {
+    out <- RR_std("NCD+LRI", "MEAN")
+    expect_equal(unique(out$endpoint), "ncd+lri")
+    ages <- as.integer(unique(out$age))
+    expect_true(all(ages >= 25) && all(ages <= 95))
+  })
+
+  it("formats 5COD with its five endpoints", {
+    out <- RR_std("5COD", "MEAN")
+    expect_setequal(unique(out$endpoint), c("copd", "ihd", "lc", "lri", "stroke"))
+  })
+
+  it("restricts IER endpoints to the ages they apply to", {
+    out <- RR_std("IER", "MEAN")
+    lri <- as.integer(out$age[out$endpoint == "lri"])
+    other <- as.integer(out$age[out$endpoint != "lri"])
+    expect_true(all(lri < 5))
+    expect_true(all(other >= 25))
+  })
+
+  it("returns only COPD for O3 and only all-cause for NO2", {
+    expect_equal(unique(RR_std("O3", "MEAN")$endpoint), "copd")
+    expect_equal(unique(RR_std("NO2", "MEAN")$endpoint), "cause")
+  })
+
+  it("returns all three CI tables for every model", {
+    for (model in cr_models()) {
+      for (index in c("MEAN", "UP", "LOW")) {
+        out <- RR_std(model, index)
+        expect_gt(nrow(out), 0)
+        expect_false(anyNA(out$RR))
+      }
+    }
+  })
+})
+
+describe("cr_models()", {
+  it("lists the accepted model names", {
+    expect_true(all(c("GEMM", "IER", "MRBRT", "O3", "NO2") %in% cr_models()))
+  })
+})

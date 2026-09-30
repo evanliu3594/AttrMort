@@ -1,0 +1,44 @@
+Package: AttrMort
+Type: Package
+Title: Attributable Mortality from Air Pollution Exposure
+Version: 0.3.0
+Authors@R: 
+    person(given = "Yifan", family = "LIU", role = c("aut", "cre"),
+           email = "yifan.liu@smail.nju.edu.cn",
+           comment = c(ORCID = "0000-0002-7705-1987"))
+Description: Estimates the health burden attributable to ambient air pollution
+    exposure. Provides attributable mortality calculation with
+    population-weighted concentration-response calibration, driving-factor
+    decomposition, uncertainty analysis, and multi-scenario batch processing.
+    Accepts data frames as well as CSV, Excel and gridded GeoTIFF inputs, and
+    aligns heterogeneous spatial and tabular data automatically. Concentration-
+    response functions include IER, GEMM, NCD+LRI, 5COD and MRBRT variants, plus
+    ozone and nitrogen dioxide curves; user-supplied lookup tables are supported.
+License: MIT + file LICENSE
+URL: https://github.com/evanliu3594/AttrMort
+BugReports: https://github.com/evanliu3594/AttrMort/issues
+Encoding: UTF-8
+LazyData: TRUE
+LazyDataCompression: xz
+Depends: 
+    R (>= 4.1)
+Imports: 
+    dplyr,
+    purrr,
+    readr,
+    readxl,
+    rlang,
+    sf,
+    stats,
+    stringr,
+    terra,
+    tidyr,
+    tools,
+    utils
+Suggests: 
+    furrr,
+    rnaturalearth,
+    testthat (>= 3.0.0),
+    writexl
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0
