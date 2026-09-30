@@ -1,0 +1,211 @@
+---
+title: "Getting started with AttrMort"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with AttrMort}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+`AttrMort` estimates deaths attributable to ambient air pollution. It is
+**pollutant-agnostic** (the built-in models cover PM<sub>2.5</sub>, O<sub>3</sub>
+and NO<sub>2</sub>; anything else can be supplied as a lookup table or a
+configuration) and **input-agnostic** (data frames, CSV/Excel files and
+gridded GeoTIFF/netCDF inputs).
+
+```{r library}
+library(AttrMort)
+```
+
+This vignette walks through:
+
+1. the data contract,
+2. a tabular quick start on the example data shipped with the package,
+3. domain aggregation with an uncertainty range,
+4. raster inputs,
+5. the concentration-response configuration and custom curves.
+
+## The data contract
+
+| Column | Meaning |
+|---|---|
+| `conc` | concentration, keyed as a character string at `dgt_conc` decimals |
+| `pop` | population count of the cell |
+| `age` | age stratum as character five-year groups (`"25"`, `"30"`, ...) |
+| `prop` | share of the domain population in that age group |
+| `endpoint` | cause label, matched against the concentration-response table |
+| `mortrate` | baseline mortality, deaths per 100,000 |
+| `location` | domain label used to join the domain-level tables |
+
+Grids are joined by coordinate keys (`x`/`y`, `lon`/`lat`) rendered as
+strings at `dgt_coord` decimals; wide tables carry one column per scenario and
+are narrowed with `scenario =`.
+
+## Tabular quick start
+
+All files in `inst/extdata/` are synthetic and ship with the package:
+
+```{r quick-start}
+extdata <- system.file("extdata", package = "AttrMort")
+sheet <- function(f) readxl::read_excel(file.path(extdata, f))
+
+deaths <- Mortality(
+  CRF       = "GEMM",
+  calc_fild = sheet("grid_info.xlsx"),
+  conc_real = sheet("grid_exposure.xlsx"),
+  pop_total = sheet("grid_pop.xlsx"),
+  age_struc = sheet("national_age_structure.xlsx"),
+  mort_rate = sheet("national_mortality.xlsx"),
+  scenario  = "base2015",
+  mort_lvl  = "location"
+)
+
+head(deaths[, c("x", "y", "location", "ncd+lri_25")])
+```
+
+The result is one row per grid cell and one `{endpoint}_{age}` column per
+stratum. `Mortality()` prints an `Analysis grain:` line saying how many cells
+and domains the run resolved and which PWRR branch it took.
+
+## Domain aggregation and uncertainty
+
+Pass `aggregate =` to sum the grid-level burdens per domain, and
+`uncertain = TRUE` to attach the range built from the low/high
+concentration-response tables (`conc_uncert` adds an exposure perturbation
+chain on top):
+
+```{r aggregate}
+by_location <- Mortality(
+  CRF          = "GEMM",
+  calc_fild    = sheet("grid_info.xlsx"),
+  conc_real    = sheet("grid_exposure.xlsx"),
+  pop_total    = sheet("grid_pop.xlsx"),
+  age_struc    = sheet("national_age_structure.xlsx"),
+  mort_rate    = sheet("national_mortality.xlsx"),
+  scenario     = "base2015",
+  mort_lvl     = "location",
+  aggregate    = "location",
+  uncertain    = TRUE,
+  conc_uncert  = 12
+)
+
+by_location[, c("location", "total", "CI_LOW", "CI_UP", "conc_pwe")]
+```
+
+`aggregate_by` keeps the endpoint and/or age breakdown
+(`"total"`, `"endpoint"`, `"age"`, `"all"`). `aggregate_mortality()` and
+`aggregate_ci()` do the same post hoc on a result you already have.
+
+## Raster inputs
+
+Rasters are aligned automatically: `conc_real` defines the analysis grid,
+`pop_total` is aggregated onto it with the total preserved, and `calc_fild`
+may be omitted entirely. This chunk turns one fictional country of the
+example grid into two GeoTIFFs, writes them to a temporary directory, draws a
+matching boundary polygon for it and runs the raster-only path:
+
+```{r rasters}
+grid <- sheet("grid_info.xlsx")
+aland <- grid[grid$location == "Aland", ]
+conc  <- merge(aland, sheet("grid_exposure.xlsx"), by = c("x", "y"))
+pop   <- merge(aland, sheet("grid_pop.xlsx"), by = c("x", "y"))
+
+# one 0.25 degree template; cell centres of the example grid fall on it
+template <- terra::rast(xmin = 5, xmax = 30, ymin = 35, ymax = 50,
+                        resolution = 0.25)
+centres <- terra::xyFromCell(template, seq_len(terra::ncell(template)))
+keys <- paste(round(centres[, 1], 2), round(centres[, 2], 2))
+to_raster <- function(df, value) {
+  r <- template
+  terra::values(r) <- df[[value]][match(keys, paste(round(df$x, 2), round(df$y, 2)))]
+  r
+}
+
+conc_tif <- tempfile(fileext = ".tif")
+pop_tif  <- tempfile(fileext = ".tif")
+terra::writeRaster(to_raster(conc, "base2015"), conc_tif)
+terra::writeRaster(to_raster(pop, "base2015"), pop_tif)
+
+boundary <- sf::st_sf(
+  location = "Aland",
+  geometry = sf::st_sfc(
+    sf::st_polygon(list(rbind(c(5, 35), c(13, 35), c(13, 50), c(5, 50), c(5, 35)))),
+    crs = 4326
+  )
+)
+
+raster_deaths <- Mortality(
+  CRF       = "GEMM",
+  conc_real = conc_tif,
+  pop_total = pop_tif,
+  age_struc = sheet("national_age_structure.xlsx"),
+  mort_rate = sheet("national_mortality.xlsx"),
+  scenario  = "base2015",
+  admin     = boundary,
+  admin_col = "location",
+  mort_lvl  = "location"
+)
+
+nrow(raster_deaths)
+sum(unlist(raster_deaths[vapply(raster_deaths, is.numeric, logical(1))]))
+```
+
+`Mortality()` reports when a supplied `calc_fild` does not match the raster
+grid, and a multi-band raster whose scenarios do not share one validity mask
+is flagged instead of silently narrowing the grid.
+
+## Concentration-response configuration
+
+Which lookup a model uses, which concentration column it carries and which
+endpoints apply to which ages all come from a JSON configuration. The shipped
+default covers the 13 built-in model names:
+
+```{r crf}
+cr_models()
+
+cfg <- cr_config()
+names(cfg$models)
+cfg$models$NO2$endpoints[[1]]
+```
+
+Pass `cr_config = "<path>"` to use your own configuration, and `CRF =` a
+model name from it. A lookup can be a shipped `rda` table, an xlsx file or a
+directory of `MEAN.csv`/`LOW.csv`/`UP.csv`; relative paths resolve against the
+configuration file, not the working directory.
+
+For a one-off pollutant/endpoint set, `build_cr_table()` turns published
+coefficients into the `MEAN`/`LOW`/`UP` structure the package consumes:
+
+```{r build-cr}
+coefs <- data.frame(
+  cause = "IHD", age = "25",
+  alpha = 5, beta = 0.01, gamma = 0.5, tmrel = 3
+)
+ier <- build_cr_table(coefs, model = "IER", conc = seq(0, 20, 0.1))
+names(ier)
+head(ier$MEAN)
+```
+
+To hand a curve directly to `Mortality(CRF =)`, reshape it to the long
+contract with columns `conc`, `endpoint`, `age`, `RR`; for anything reused
+across analyses, register it in a configuration instead.
+
+## Where to go next
+
+* `?Mortality` — the full argument list (`aggregate`, `uncertain`,
+  `conc_uncert`, `chunk_ages`, `cr_config`).
+* `?cr_config`, `?RR_std`, `?build_cr_table` — the concentration-response
+  layer.
+* `?build_grid_info`, `?domain_summary` — reusing one grid across scenarios
+  and reducing a gridded analysis to one row per domain.
+* `?Decomposition` — driving-factor decomposition over 24 driver orderings.
+* `citation("AttrMort")` and the package `README` for methodology references.

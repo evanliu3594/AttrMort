@@ -267,10 +267,11 @@ describe("lookup coverage", {
 }
 
 .custom_config <- function(dir, kind = "xlsx", sheets = NULL) {
+  extra <- if (is.null(sheets)) "" else sheets
   lookup <- if (kind == "xlsx") {
-    sprintf('{"kind": "xlsx", "path": "lookups/x.xlsx"%s}', sheets %||% "")
+    sprintf('{"kind": "xlsx", "path": "lookups/x.xlsx"%s}', extra)
   } else {
-    sprintf('{"kind": "csv", "path": "csvdir"%s}', sheets %||% "")
+    sprintf('{"kind": "csv", "path": "csvdir"%s}', extra)
   }
   # The config must live in `dir` for its relative lookup paths to resolve
   # against the config directory (which is exactly what we are testing).

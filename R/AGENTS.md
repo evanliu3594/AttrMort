@@ -99,5 +99,4 @@
 3. **结果导出约定**：`write_mortality_xlsx()` 只接受显式 `path`，还没有 `Result/{模型}_{层级}_{维度}_{日期}.xlsx` 这类默认命名与目录约定。
 4. **`aggregate_ci()` 与 `Mortality(uncertain = TRUE)` 的边界**：前者要求调用方自带 `_MEAN/_UP/_LOW` 后缀，后者直接给区间；若将来让 `Mortality()` 一次输出三支并加后缀，需明确两者分工。
 5. **独立误差口径**：若需要「每格误差独立」的抽样区间，可增加 `ci_method = "quadrature"`（现有 range 口径为共模假设）。
-6. **vignette 未写**：`vignettes/` 为空，除 README 外没有教程。
-7. **JSON C-R 配置迁移（P0–P3 已完成，P4 待做）**：内置 13 个模型名已由 `inst/extdata/cr_models.json` 驱动，`.CR_TABLE_REGISTRY`、`RR_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 已删除；自定义模型可经 `cr_config=` + xlsx/csv 查表接入并有端到端测试；NO<sub>2</sub> 端点按拍板改为 `allcause`（对应查表前缀 `cause`，指纹参照已更新、数值不变）。待做：vignette/教程与发布说明。设计见 `diagnosis/design_json_crf_migration_260930.md`，完成后删除本条。
+6. **JSON C-R 配置迁移（P0–P3 已完成，P4 待做）**：内置 13 个模型名已由 `inst/extdata/cr_models.json` 驱动，`.CR_TABLE_REGISTRY`、`RR_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 已删除；自定义模型可经 `cr_config=` + xlsx/csv 查表接入并有端到端测试；NO<sub>2</sub> 端点按拍板改为 `allcause`（对应查表前缀 `cause`，指纹参照已更新、数值不变）。教程见 `vignettes/AttrMort.Rmd`；待做仅剩发布说明（`NEWS.md`/版本号按用户决定暂不动）。设计见 `diagnosis/design_json_crf_migration_260930.md`，完成后删除本条。

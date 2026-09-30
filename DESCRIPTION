@@ -37,8 +37,11 @@ Imports:
     tools,
     utils
 Suggests: 
+    knitr,
     rnaturalearth,
+    rmarkdown,
     testthat (>= 3.0.0),
     writexl
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Config/roxygen2/version: 8.1.0
