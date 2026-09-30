@@ -6,13 +6,18 @@
 #' terra), extracts cell coordinates and values, and returns a data.frame
 #' suitable for joining with other inputs in the Mortality() pipeline.
 #'
+#' The layers of a multi-band raster are scenarios on one grid, so every
+#' scenario is expected to share the same validity mask. A cell that carries
+#' a value in only some layers is reported with a warning and dropped from
+#' the analysis grid, instead of silently narrowing it for every scenario.
+#'
 #' @param path Character. Path to a raster file (GeoTIFF or other
 #'   terra-supported format).
 #' @param band_names Character vector. Names for each band. If NULL, band
 #'   names are taken from the file metadata; if metadata is empty, defaults
 #'   to "band_1", "band_2", ...
 #' @param dgt Integer. Number of decimal places for coordinate rounding.
-#'   Must match the target grid resolution (e.g. dgt = 1 for 0.1 deg grids).
+#'   Must match the `dgt_coord` of the other inputs (default 2).
 #'   Coordinates are returned as character strings for matchable()-style
 #'   joins.
 #'
@@ -22,9 +27,9 @@
 #' @noRd
 #' @examples
 #' \dontrun{
-#'   grid_df <- raster_to_grid("path/to/pm25.tif", dgt = 1)
+#'   grid_df <- raster_to_grid("path/to/pm25.tif", dgt = 2)
 #' }
-raster_to_grid <- function(path, band_names = NULL, dgt = 1) {
+raster_to_grid <- function(path, band_names = NULL, dgt = 2) {
   # Accept a SpatRaster as well as a path: terra::rast() on an existing
   # SpatRaster would return an empty *template* rather than the data.
   r <- if (inherits(path, "SpatRaster")) path else terra::rast(path)
@@ -46,12 +51,34 @@ raster_to_grid <- function(path, band_names = NULL, dgt = 1) {
     )
   }
 
-  # convert to data.frame
-  df <- terra::as.data.frame(r, xy = TRUE, na.rm = TRUE)
+  # convert to data.frame. Every cell is read, then only the cells carrying a
+  # value in *all* layers are kept. Multi-band rasters are scenarios on one
+  # grid, so a cell that some layers carry and others do not means the
+  # scenarios do not share one validity mask: report it instead of dropping
+  # the cell from the whole analysis grid without a word.
+  df <- terra::as.data.frame(r, xy = TRUE, na.rm = FALSE)
 
   # rename value columns
   value_cols <- setdiff(names(df), c("x", "y"))
   names(df)[names(df) %in% value_cols] <- band_names
+
+  n_na <- rowSums(is.na(df[band_names]))
+  incomplete <- n_na > 0 & n_na < length(band_names)
+  if (any(incomplete)) {
+    missing <- vapply(band_names, function(b) sum(is.na(df[[b]][incomplete])),
+                      integer(1))
+    lines <- sprintf("%s: %d", band_names[missing > 0], missing[missing > 0])
+    if (length(lines) > 5) lines <- c(utils::head(lines, 5), "...")
+    warning(
+      sum(incomplete), " cell(s) carry values in only some of the ",
+      length(band_names), " raster layer(s); multi-band rasters are expected ",
+      "to share one validity mask. The incomplete cell(s) are dropped from ",
+      "the analysis grid (missing values per layer: ",
+      paste(lines, collapse = ", "), ").",
+      call. = FALSE
+    )
+  }
+  df <- df[n_na == 0, , drop = FALSE]
 
   # round and coerce coordinates to character (matchable-compatible)
   df$x <- matchable(df$x, dgt = dgt)
@@ -234,7 +261,7 @@ align_to_target <- function(raster_list,
 shapefile_to_grid <- function(shp_path        = NULL,
                                template_raster,
                                admin_col       = "admin",
-                               dgt             = 1) {
+                               dgt             = 2) {
 
   # ---- load shapefile ----------------------------------------------------
   if (is.null(shp_path)) {

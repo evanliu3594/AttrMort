@@ -46,6 +46,37 @@ describe("raster_to_grid()", {
     expect_error(AttrMort:::raster_to_grid(r, band_names = c("a", "b")),
                  "does not match")
   })
+
+  it("warns and drops the cells that only some bands carry", {
+    # A multi-band raster is one grid of scenarios: a cell present in some
+    # bands but not others means the scenarios do not share one mask. It is
+    # reported, never silently used to narrow the grid for every scenario.
+    r <- .make_raster(2, 2, c(1, 2, 3, 4))
+    s <- c(r, r)
+    terra::values(s)[, 2] <- c(NA, 2, 3, 4)
+
+    expect_warning(out <- AttrMort:::raster_to_grid(s, dgt = 0),
+                   "only some")
+    expect_equal(nrow(out), 3)
+    expect_false(anyNA(out$band_1))
+    expect_false(anyNA(out$band_2))
+  })
+
+  it("stays silent when all bands share one validity mask", {
+    r <- .make_raster(2, 2, c(1, 2, 3, 4))
+    s <- c(r, r)
+    terra::values(s)[1, ] <- NA          # same cell missing in every band
+
+    out <- AttrMort:::raster_to_grid(s, dgt = 0)
+    expect_equal(nrow(out), 3)
+  })
+
+  it("drops NA cells of a single-band raster without warning", {
+    r <- .make_raster(2, 2, c(1, NA, 3, 4))
+    out <- AttrMort:::raster_to_grid(r, dgt = 0)
+    expect_equal(nrow(out), 3)
+    expect_false(anyNA(out$band_1))
+  })
 })
 
 describe(".aggregate_pop()", {
