@@ -328,3 +328,10 @@ C-R 侧不引入新公式，只是“同一公式、元数据外置”。沿用 
 | P2 | 删除 `.CR_TABLE_REGISTRY`、6 个 reshape 分支、`.CR_ENDPOINTS` 与同步测试；`validate_mortality_input()` 读配置；NO₂ 端点改名并同步示例数据的 `national_mortality.xlsx` 与 `crf-NO2.csv` 指纹（列名前缀变化、数值逐位不变） | 全量测试 `FAIL 0 / WARN 0`；指纹 42 全过；`R CMD check` `Status: OK`（0/0/0） |
 
 **待做（P3–P4）。** 自定义 xlsx/csv 查表的端到端测试（配置相对路径解析、缺 sheet/缺列错误）；`Mortality(cr_config=)` 端到端；README/vignette 收尾；`NEWS.md` 与版本号按用户既有指示未动，发布前需补记破坏性变更（NO₂ 端点改名、`cr_models()` 现在含别名且来自配置）。
+
+## 补记二（2026-09-30，P3 完成）
+
+- 新增端到端测试（`tests/testthat/test-cr-config.R`）：用户 xlsx 查表生成标准长表；csv 目录（MEAN/LOW/UP.csv）同样跑通；`Mortality(CRF="MYX", cr_config=<路径>)` 端到端出结果；错误路径覆盖“sheet 不存在、查表文件不存在、缺浓度列”。
+- 测试显式验证**相对路径按配置文件目录解析**：配置文件与 `lookups/`、`csvdir/` 同置临时目录，cwd 无关。
+- 验收：全量测试 `FAIL 0 / WARN 0 / PASS 674`、指纹 42、`R CMD check` `Status: OK`（0/0/0）。
+- 剩余 P4：vignette/教程与发布说明。`NEWS.md`、版本号仍按用户决定未动。

@@ -164,3 +164,125 @@ describe("cr_config() validation", {
     expect_error(cr_config(f), "models.X.endpoints\\[1\\].ages")
   })
 })
+
+# Custom-model end-to-end: user config + file lookup, no package data touched.
+.write_custom_lookup <- function(dir) {
+  tab <- data.frame(
+    concentration = c("10", "20"),
+    ihd_25 = c(1.10, 1.20),
+    ihd_30 = c(1.30, 1.40)
+  )
+  low <- tab; low[2:3] <- tab[2:3] - 0.05
+  up  <- tab; up[2:3]  <- tab[2:3] + 0.05
+  lookup_dir <- file.path(dir, "lookups")
+  dir.create(lookup_dir, showWarnings = FALSE, recursive = TRUE)
+  writexl::write_xlsx(list(MEAN = tab, LOW = low, UP = up),
+                      file.path(lookup_dir, "x.xlsx"))
+
+  csv_dir <- file.path(dir, "csvdir")
+  dir.create(csv_dir, showWarnings = FALSE, recursive = TRUE)
+  readr::write_csv(tab, file.path(csv_dir, "MEAN.csv"))
+  readr::write_csv(low, file.path(csv_dir, "LOW.csv"))
+  readr::write_csv(up,  file.path(csv_dir, "UP.csv"))
+  invisible(dir)
+}
+
+.custom_config <- function(dir, kind = "xlsx", sheets = NULL) {
+  lookup <- if (kind == "xlsx") {
+    sprintf('{"kind": "xlsx", "path": "lookups/x.xlsx"%s}', sheets %||% "")
+  } else {
+    sprintf('{"kind": "csv", "path": "csvdir"%s}', sheets %||% "")
+  }
+  # The config must live in `dir` for its relative lookup paths to resolve
+  # against the config directory (which is exactly what we are testing).
+  f <- file.path(dir, "cr_config.json")
+  writeLines(c(
+    '{"schema_version": 1, "models": {',
+    paste0('"MYX": {"lookup": ', lookup, ', "conc_col": "concentration",',
+           ' "endpoints": [{"name": "ihd", "ages": [25, 30]}]}'),
+    '}}'
+  ), f)
+  f
+}
+
+describe("custom models from file lookups", {
+  it("builds the standard long table from a user xlsx", {
+    dir <- file.path(tempdir(), "attrmort-cr-xlsx")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    .write_custom_lookup(dir)
+    cfg <- cr_config(.custom_config(dir))
+
+    out <- RR_std("MYX", "MEAN", config = cfg)
+    expect_equal(names(out), c("conc", "endpoint", "age", "RR"))
+    expect_equal(unique(out$endpoint), "ihd")
+    expect_equal(sort(unique(out$age)), c("25", "30"))
+    expect_equal(out$RR[out$conc == "10" & out$age == "25"], 1.10)
+    expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.40)
+
+    up <- RR_std("MYX", "UP", config = cfg)
+    expect_equal(up$RR[up$conc == "10" & up$age == "25"], 1.15)
+  })
+
+  it("builds the same table from a csv directory", {
+    dir <- file.path(tempdir(), "attrmort-cr-csv")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    .write_custom_lookup(dir)
+    cfg <- cr_config(.custom_config(dir, kind = "csv"))
+
+    out <- RR_std("MYX", "MEAN", config = cfg)
+    expect_equal(nrow(out), 4)
+    expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.40)
+  })
+
+  it("runs through Mortality() with cr_config =", {
+    dir <- file.path(tempdir(), "attrmort-cr-run")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    .write_custom_lookup(dir)
+    cfg_path <- .custom_config(dir)
+
+    d <- .attr_small_long()
+    d$conc_real$conc <- c("10", "20", "10", "20")
+    d$mort_rate <- data.frame(
+      location = "A", age = c("25", "30"), endpoint = "ihd",
+      mortrate = c(1000, 2000)
+    )
+    out <- Mortality(
+      CRF = "MYX", cr_config = cfg_path, calc_fild = d$calc_fild,
+      conc_real = d$conc_real, pop_total = d$pop_total,
+      age_struc = d$age_struc, mort_rate = d$mort_rate,
+      mort_lvl = "location", validate = "off"
+    )
+    expect_equal(nrow(out), 4)
+    expect_true(all(c("ihd_25", "ihd_30") %in% names(out)))
+  })
+
+  it("reports missing sheets, missing concentration columns and bad paths", {
+    dir <- file.path(tempdir(), "attrmort-cr-errors")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    .write_custom_lookup(dir)
+
+    bad_sheet <- .custom_config(
+      dir, sheets = ', "sheets": {"MEAN": "NOPE", "LOW": "LOW", "UP": "UP"}'
+    )
+    expect_error(RR_std("MYX", config = bad_sheet))
+
+    bad_path <- file.path(dir, "bad_path.json")
+    writeLines(c(
+      '{"schema_version": 1, "models": {',
+      '"MYX": {"lookup": {"kind": "xlsx", "path": "missing.xlsx"},',
+      ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
+      '}}'
+    ), bad_path)
+    expect_error(RR_std("MYX", config = bad_path), "not found")
+
+    no_conc <- file.path(dir, "no_conc.json")
+    writeLines(c(
+      '{"schema_version": 1, "models": {',
+      '"MYX": {"lookup": {"kind": "csv", "path": "csvdir"},',
+      ' "conc_col": "nope",',
+      ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
+      '}}'
+    ), no_conc)
+    expect_error(RR_std("MYX", config = no_conc), "nope")
+  })
+})
