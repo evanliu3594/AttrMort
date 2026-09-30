@@ -167,3 +167,12 @@
 **破坏性变更（单独列出）**：移除 `Mortality_batch()` 与 `combine_batch()`。受影响者：0.2.0 起使用这两个函数、或依赖 `furrr` 并行批处理的调用方；替代方式为对 `scenario` 逐个调用 `Mortality()` 后自行合并。按用户指示未写 `NEWS.md`，发布前需补记。
 
 **下一步**：在迁移设计分支中输出《PM2.5-attr-mort v5 → AttrMort 迁移设计》，覆盖 JSON schema、状态/路径去全局化、`RR_std()` 接口适配、口径保留清单（range、PWRR、分解 serie）、废弃清单（`.CR_TABLE_REGISTRY`/reshape 分支/`.CR_ENDPOINTS`/`data/*.rda` 与 I-9 的整数键提案）。
+
+## 补记四（2026-09-30，触发原因：I-2 远端操作已完成，回填结果）
+
+- 收口提交（main）：`a157281` MF-1 → `c27de59` 查表规范化 → `0ad8507` 删 batch + I-1..I-9 → `d682000` 归档审计报告与复现脚本；工作区干净。
+- I-2 按拍板执行并**成功**（本机可访问 GitHub）：
+  - 本地 `archive/pre-0.3` 标签指向旧线 `dba409d`，已推送：`refs/tags/archive/pre-0.3 -> dba409d`；
+  - `git push --force-with-lease origin main` 成功：远端 `main` 由 `dba409d` 更新为 `d682000`（旧线仍可由标签检出）；
+  - `git ls-remote` 核验：远端只有 `refs/heads/main`（d682000）与上述标签；旧的 `refs/heads/master`（`b73d75f`）在远端已不存在，本地 `master` 为陈旧引用。
+- 后续工作进入独立分支 `refactor/json-crf-migration`（自 `main` 创建），迁移设计作为该分支首个交付物。
