@@ -202,6 +202,6 @@ Mortality(
 }
 }
 \seealso{
-[build_grid_info()], [domain_summary()], [Mortality_batch()],
+[build_grid_info()], [domain_summary()],
   [Decomposition()], [aggregate_mortality()]
 }

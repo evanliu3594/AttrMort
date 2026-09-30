@@ -8,9 +8,9 @@
 | 文件 | 职责 |
 |---|---|
 | `AttrMort-package.R` | 包级文档、roxygen 导入声明、`globalVariables()`；新增依赖时**先改这里** |
-| `Mortality.R` | `Mortality()` 编排（七阶段）、`.calc_attributable()` 计算核、聚合与区间接线 |
+| `Mortality.R` | `Mortality()` 编排（七阶段）、`.calc_attributable()` 计算核、聚合与区间接线、`.standardize_age_key()` |
 | `ingest.R` | `.check_input_files()`、`.ingest_single_input()`、`.ingest_and_map()`、`.align_raster_inputs()`、`.attach_admin()`、`.extract_scenario()` |
-| `utils.R` | `matchable()`、`getConc()`/`getPop()`/`getAge()`/`getMort()`、`.resolve_key_cols()`、`.pick_column()`、`.standardize_age_key()` |
+| `utils.R` | `matchable()`、`getConc()`/`getPop()`/`getAge()`/`getMort()`、`.resolve_key_cols()`、`.pick_column()` |
 | `RR_std.R` | 内置查表注册表 `.CR_TABLE_REGISTRY`、`.match_ci()`、`.match_cr_model()`、`RR_std()`、`cr_models()` |
 | `schema-detect.R` | `.COLUMN_VARIANTS`、`.COLUMN_TARGET`、`.CR_ENDPOINTS`、`detect_columns()`、`validate_mortality_input()` |
 | `raster-io.R` | `raster_to_grid()`、`align_to_target()`、`.aggregate_pop()`、`shapefile_to_grid()`、`.resolve_target_res()` |
@@ -20,7 +20,6 @@
 | `aggregate.R` | `aggregate_mortality()`、`aggregate_ci()`、`write_mortality_xlsx()`；列名解析（从右往左切最后一个 `_`）在此 |
 | `build-cr.R` | `build_cr_table()`、`.cr_model_form()`、各模型的曲线函数 |
 | `DrivingFactors.R` | `.DRIVER_ORDER`、`.permutations()`、`Decomposition()` |
-| `batch.R` | `Mortality_batch()`、`combine_batch()` |
 | `data.R` | `data/*.rda` 九张内置查表的 roxygen 文档 |
 
 ## 二、`Mortality()` 的七阶段
@@ -48,7 +47,8 @@
 ## 四、改前必读的内部契约
 
 - **列名映射方向**：`detect_columns()` 返回 `c(语义 = 实际列名)`，重命名必须是「实际 → 规范名」（查 `.COLUMN_TARGET` 表）。方向写反会把 `endpoint` 改成 `cause`，且会以列检查失败的形式暴露。
-- **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `RR_std()` 渲染，新模型必须登记进 `.CR_TABLE_REGISTRY`，否则数值/字符不一致会在 join 处报错。
+- **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `RR_std()` 渲染，新模型必须登记进 `.CR_TABLE_REGISTRY`，否则数值/字符不一致会在 join 处报错。内置查表的原始 `conc` 列也须是字符键（`tests/testthat/test-RR_std.R` 会比对原始对象）。
+- **多波段栅格掩膜**：多情景栅格必须共享同一有效掩膜；`raster_to_grid()` 只保留所有层都有值的格子，某格只在部分层有值时**必须告警**并说明各层缺测数，不得静默收窄网格。
 - **人口栅格聚合**：`.aggregate_pop()` 先 `terra::aggregate(fun = "sum")` 再 resample，并核对总量；不要退回 `terra::resample(method = "sum")`（不守恒）。
 - **分辨率交互**：`.resolve_target_res()` 在非交互会话不得调用 `readline()`；> 1e9 格直接拒绝。
 - **区间口径**：`.range_sum()`/`.attach_range()` 是逐格分位求和（共模），不得改回平方和形式。
@@ -77,6 +77,7 @@
 | `test-grid-path.R` | 栅格路径：`calc_fild` 可省、国家级默认边界、年龄切片、netCDF、单层栅格无 `scenario` |
 | `test-grid-info.R` | `build_grid_info()` 产物与三条路径等价、**骨架全错位报错 / 部分错位告警**（`validate = "off"` 全关）、`.rds`/`.csv` 往返、表格输入模式 |
 | `test-domain-summary.R` | `domain_summary()` 列与属性、域级骨架端到端、`Analysis grain:` 各分支文案、两种粒度差异（Jensen gap）钉住、`.rds`/`.csv` 往返 |
+| `test-Decomposition.R` | 24 种排列映射、起止点与单情景 `Mortality()` 逐行一致、单驱动差分等于前缀运行之差、望远镜加和、CI 分支透传、非法 `serie` 报错 |
 
 - 数值路径改动前后各跑一次指纹回归：设 `ATTRMORT_FINGERPRINTS=1` 跑 `devtools::test(filter = "fingerprints")`（用 `=update` 重写参照）；参照指纹在 `tests/testthat/fixtures/fingerprints/`。
 - 测试只放在 `tests/testthat/`；手工脚本放 `data-raw/`，因为 `R CMD check` 会执行 `tests/` 下每个 `.R`。

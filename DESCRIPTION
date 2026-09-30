@@ -9,7 +9,7 @@ Authors@R:
 Description: Estimates the health burden attributable to ambient air pollution
     exposure. Provides attributable mortality calculation with
     population-weighted concentration-response calibration, driving-factor
-    decomposition, uncertainty analysis, and multi-scenario batch processing.
+    decomposition and uncertainty analysis.
     Accepts data frames as well as CSV, Excel and gridded GeoTIFF inputs, and
     aligns heterogeneous spatial and tabular data automatically. Concentration-
     response functions include IER, GEMM, NCD+LRI, 5COD and MRBRT variants, plus
@@ -36,7 +36,6 @@ Imports:
     tools,
     utils
 Suggests: 
-    furrr,
     rnaturalearth,
     testthat (>= 3.0.0),
     writexl

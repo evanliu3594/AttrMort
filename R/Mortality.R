@@ -329,7 +329,7 @@
 #'   `uncertain = TRUE` two extra columns, `CI_LOW` and `CI_UP`, hold the
 #'   range for each row total.
 #'
-#' @seealso [build_grid_info()], [domain_summary()], [Mortality_batch()],
+#' @seealso [build_grid_info()], [domain_summary()],
 #'   [Decomposition()], [aggregate_mortality()]
 #'
 #' @export
@@ -542,7 +542,8 @@ Mortality <- function(
     report <- validate_mortality_input(
       list(conc = conc_real, pop = pop_total, age_struc = age_struc,
            mort_rate = mort_rate),
-      cr_model = if (is.character(CRF)) .match_cr_model(CRF) else NA_character_
+      cr_model = if (is.character(CRF)) .match_cr_model(CRF) else NA_character_,
+      dgt_conc = dgt_conc
     )
     if (!report$valid && validate == "stop") {
       stop("Input validation failed:\n  - ",

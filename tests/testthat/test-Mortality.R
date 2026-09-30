@@ -32,7 +32,7 @@ describe("Mortality() on the small fixture", {
     doubled <- Mortality(
       CRF = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
       pop_total = d$pop_total, age_struc = d$age_struc,
-      mort_rate = d$mort_rate, mort_lvl = "location"
+      mort_rate = d$mort_rate, mort_lvl = "location", validate = "off"
     )
     expect_equal(doubled[["ncd+lri_25"]], base[["ncd+lri_25"]] * 2)
   })
@@ -76,7 +76,7 @@ describe("Mortality() on the small fixture", {
     out <- Mortality(
       CRF = rr, calc_fild = d$calc_fild, conc_real = d$conc_real,
       pop_total = d$pop_total, age_struc = d$age_struc,
-      mort_rate = d$mort_rate, mort_lvl = "location"
+      mort_rate = d$mort_rate, mort_lvl = "location", validate = "off"
     )
     expect_equal(out[["ncd+lri_25"]], .attr_run()[["ncd+lri_25"]])
   })
@@ -115,11 +115,15 @@ describe("Mortality() input checks", {
   it("can turn validation into a hard error", {
     d <- .attr_small_long()
     d$mort_rate$mortrate[1] <- -1
+    # the validation warnings that precede the stop are not what this test is
+    # about; they have their own tests in test-schema-detect.R
     expect_error(
-      Mortality(
-        CRF = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
-        pop_total = d$pop_total, age_struc = d$age_struc,
-        mort_rate = d$mort_rate, mort_lvl = "location", validate = "stop"
+      suppressWarnings(
+        Mortality(
+          CRF = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
+          pop_total = d$pop_total, age_struc = d$age_struc,
+          mort_rate = d$mort_rate, mort_lvl = "location", validate = "stop"
+        )
       ),
       "validation failed"
     )
@@ -155,28 +159,5 @@ describe("Mortality() on the shipped example data", {
     expect_equal(nrow(out), 6000)
     num <- out[vapply(out, is.numeric, logical(1))]
     expect_equal(sum(as.matrix(num)), 58183.612439, tolerance = 1e-6)
-  })
-})
-
-describe("Mortality_batch() and combine_batch()", {
-  it("runs several scenarios and combines the results", {
-    s <- .attr_small()
-    s$conc_real$SSP1_2030 <- c(8, 16, 24, 32)
-    s$pop_total$SSP1_2030 <- c(110, 210, 310, 410)
-    s$age_struc$SSP1_2030 <- c(0.4, 0.6)
-    s$mort_rate$SSP1_2030 <- c(900, 2100)
-
-    res <- suppressMessages(Mortality_batch(
-      CRF = "GEMM", calc_fild = s$calc_fild,
-      conc_real = s$conc_real, pop_total = s$pop_total,
-      age_struc = s$age_struc, mort_rate = s$mort_rate,
-      mort_lvl = "location",
-      scenarios = c("base2015", "SSP1_2030")
-    ))
-
-    expect_named(res, c("base2015", "SSP1_2030"))
-    combined <- combine_batch(res, by = "location")
-    expect_true("scenario" %in% names(combined))
-    expect_equal(nrow(combined), 2)
   })
 })

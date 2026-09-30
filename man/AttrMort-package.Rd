@@ -23,7 +23,6 @@ can be supplied as a custom lookup table through the `CRF` argument of
 * [Mortality()] — attributable deaths per scenario, per grid cell or per
   domain, with an optional uncertainty range
 * [Decomposition()] — driving-factor decomposition
-* [Mortality_batch()] — multi-scenario runs
 * [aggregate_mortality()], [aggregate_ci()] — post-hoc aggregation
 * [build_cr_table()], [RR_std()], [cr_models()] — concentration-response
   tables

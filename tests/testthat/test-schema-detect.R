@@ -131,6 +131,11 @@ describe("validate_mortality_input()", {
   it("warns about implausible rates without blocking", {
     d <- .attr_small_long()
     d$mort_rate$mortrate[1] <- 1e5
+    # a complete standard age structure: this test is about the rate warning,
+    # not the age-completeness warning
+    d$age_struc <- data.frame(
+      location = "A", age = as.character(seq(0, 95, 5)), prop = 1 / 20
+    )
     expect_warning(
       report <- AttrMort:::validate_mortality_input(
         list(conc = d$conc_real, pop = d$pop_total, age_struc = d$age_struc,
@@ -140,5 +145,35 @@ describe("validate_mortality_input()", {
       "above"
     )
     expect_true(report$valid)
+  })
+
+  it("warns about concentration keys that are not canonical at dgt_conc", {
+    capture_warnings <- function(data_list) {
+      warns <- character(0)
+      report <- withCallingHandlers(
+        AttrMort:::validate_mortality_input(
+          data_list, cr_model = "GEMM", dgt_conc = 1
+        ),
+        warning = function(w) {
+          warns <<- c(warns, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        }
+      )
+      list(report = report, warns = warns)
+    }
+
+    d <- .attr_small_long()
+    d$conc_real$conc[1] <- "10.00"          # parseable, not matchable(10, 1)
+    res <- capture_warnings(list(conc = d$conc_real, pop = d$pop_total,
+                                 age_struc = d$age_struc,
+                                 mort_rate = d$mort_rate))
+    expect_true(any(grepl("dgt_conc", res$warns)))
+    expect_true(res$report$valid)           # a key problem is not blocking
+
+    d$conc_real$conc[1] <- "10"             # canonical: no key warning
+    res <- capture_warnings(list(conc = d$conc_real, pop = d$pop_total,
+                                 age_struc = d$age_struc,
+                                 mort_rate = d$mort_rate))
+    expect_false(any(grepl("dgt_conc", res$warns)))
   })
 })

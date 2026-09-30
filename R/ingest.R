@@ -21,7 +21,7 @@
 # Ingest one input: data.frame passes through; a character path is loaded
 # according to its extension. Raster paths are handled by the caller
 # (.align_raster_inputs) so that they can be aligned first.
-.ingest_single_input <- function(x, dgt_coord = 1) {
+.ingest_single_input <- function(x, dgt_coord = 2) {
   if (is.data.frame(x)) {
     return(x)
   }
@@ -92,7 +92,7 @@
 
 # Ingest an input, rename its columns to the canonical schema, and render its
 # numeric coordinate keys as strings.
-.ingest_and_map <- function(x, schema, dgt_coord = 1, label = NULL) {
+.ingest_and_map <- function(x, schema, dgt_coord = 2, label = NULL) {
   df <- .ingest_single_input(x, dgt_coord)
 
   mapping <- detect_columns(df, schema = schema, quiet = TRUE)
@@ -320,10 +320,17 @@
   # Every input is extracted only when it is present: `conc_cf` is optional in
   # Mortality() and the domain summary carries no age structure or mortality
   # table at all, so NULL stays NULL instead of being handed to getAge().
+  # getAge()'s own age-completeness check is skipped here: Mortality() reports
+  # the same problem once, through validate_mortality_input(), and reporting it
+  # twice only trains users to ignore warnings.
   list(
     conc_real = getConc(conc_real, scenario, dgt = dgt_conc),
     pop_total = getPop(pop_total, scenario),
-    age_struc = if (is.null(age_struc)) NULL else getAge(age_struc, scenario),
+    age_struc = if (is.null(age_struc)) {
+      NULL
+    } else {
+      getAge(age_struc, scenario, min_age_groups = 0)
+    },
     mort_rate = if (is.null(mort_rate)) NULL else getMort(mort_rate, scenario),
     conc_cf   = if (is.null(conc_cf)) NULL else getConc(conc_cf, scenario,
                                                         dgt = dgt_conc)

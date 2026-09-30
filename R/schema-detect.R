@@ -120,7 +120,8 @@ detect_columns <- function(df,
 validate_mortality_input <- function(data_list,
                                      cr_model      = NA_character_,
                                      age_tolerance = 0.01,
-                                     max_rate      = 5e4) {
+                                     max_rate      = 5e4,
+                                     dgt_conc      = 1) {
   issues   <- character(0)
   blocking <- character(0)
 
@@ -242,6 +243,25 @@ validate_mortality_input <- function(data_list,
       if (n_neg > 0) {
         blockf("conc: %s negative value(s) in '%s'",
                format(n_neg, big.mark = ","), conc_col[1])
+      }
+
+      # A character concentration column is trusted as a key, so it has to
+      # already be rendered the way the lookup tables are: matchable() at
+      # `dgt_conc`. Anything else (e.g. "35.20") simply never joins, and the
+      # symptom is an empty join several steps later -- say it here instead.
+      raw <- conc_df[[conc_col[1]]]
+      if (is.factor(raw)) raw <- as.character(raw)
+      if (is.character(raw)) {
+        canon <- matchable(conc_vals, dgt = dgt_conc)
+        bad   <- !is.na(conc_vals) & raw != canon
+        if (any(bad)) {
+          first <- which(bad)[1]
+          warnf(paste0("conc: %s value(s) are not rendered at `dgt_conc = %d` ",
+                       "(e.g. '%s' instead of '%s'); exposure keys must be ",
+                       "matchable(conc, dgt_conc) to join the lookup table"),
+                format(sum(bad), big.mark = ","), dgt_conc,
+                raw[first], canon[first])
+        }
       }
     }
   }

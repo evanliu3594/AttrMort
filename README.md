@@ -209,7 +209,6 @@ Column names are matched heuristically when they are not already canonical
 | `build_grid_info()` | the analysis grid as a table (coordinates, domain labels, `res`/`ext`/`crs`/`n_cells`), reusable across scenarios and writable to `.rds`/`.csv`/`.xlsx` |
 | `domain_summary()` | the domain grain as a table: one row per domain with `conc_pwe`, `conc_mean`, `pop_total` and `n_cells`, built from the same alignment and boundary rasterization `Mortality()` runs |
 | `Decomposition()` | driving-factor decomposition (24 permutations of population growth, ageing, exposure and other risk factors) |
-| `Mortality_batch()`, `combine_batch()` | multi-scenario runs, sequentially or with `furrr` |
 | `aggregate_mortality()`, `aggregate_ci()` | aggregate a result by domain and by endpoint/age, keeping MEAN/UP/LOW side by side |
 | `getConc()`, `getPop()`, `getAge()`, `getMort()` | pull one scenario out of a wide table |
 | `RR_std()`, `cr_models()` | concentration-response lookup tables and the list of valid model names |

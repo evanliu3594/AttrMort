@@ -3,7 +3,7 @@
 # Key-column aliases recognised when the user does not name them explicitly.
 .COORD_VARIANTS <- c(
   "x", "y", "X", "Y", "lon", "lat", "Lon", "Lat",
-  "long", "lat", "longitude", "latitude", "Longitude", "Latitude",
+  "long", "longitude", "latitude", "Longitude", "Latitude",
   "GID", "GridID"
 )
 
@@ -13,8 +13,11 @@
 )
 
 # Resolve the key columns of a wide table: explicit `keys` win, then the
-# coordinate aliases, then the domain aliases.
-.resolve_key_cols <- function(.data, keys, coord, domain) {
+# coordinate aliases, then the domain aliases. `key_arg` is the name of the
+# caller's own argument so that the error can point at the parameter the user
+# actually has in front of them (`xy` in getConc()/getPop(), `loc` in
+# getAge()/getMort()).
+.resolve_key_cols <- function(.data, keys, coord, domain, key_arg = "xy") {
   nm <- names(.data)
 
   if (!is.null(keys)) {
@@ -42,7 +45,7 @@
   stop(
     "No coordinate or domain key column found. Available columns: ",
     paste(nm, collapse = ", "),
-    ". Name them explicitly with the `xy` argument.", call. = FALSE
+    ". Name them explicitly with the `", key_arg, "` argument.", call. = FALSE
   )
 }
 
@@ -134,7 +137,8 @@ getConc <- function(.data, case, xy = NULL, dgt = 1) {
     stop("Only accept data.frame INPUT.", call. = FALSE)
   }
   .check_scenario(.data, case)
-  keys <- .resolve_key_cols(.data, xy, .COORD_VARIANTS, .DOMAIN_VARIANTS)
+  keys <- .resolve_key_cols(.data, xy, .COORD_VARIANTS, .DOMAIN_VARIANTS,
+                            key_arg = "xy")
 
   .data |>
     select(all_of(keys), conc = !!case) |>
@@ -156,7 +160,8 @@ getPop <- function(.data, case, xy = NULL) {
     stop("Only accept data.frame INPUT.", call. = FALSE)
   }
   .check_scenario(.data, case)
-  keys <- .resolve_key_cols(.data, xy, .COORD_VARIANTS, .DOMAIN_VARIANTS)
+  keys <- .resolve_key_cols(.data, xy, .COORD_VARIANTS, .DOMAIN_VARIANTS,
+                            key_arg = "xy")
 
   .data |> select(all_of(keys), pop = !!case)
 }
@@ -189,7 +194,8 @@ getAge <- function(.data, case, loc = NULL, min_age_groups = 20) {
     stop("Only accept data.frame INPUT.", call. = FALSE)
   }
   .check_scenario(.data, case)
-  loc_cols <- .resolve_key_cols(.data, loc, .DOMAIN_VARIANTS, .COORD_VARIANTS)
+  loc_cols <- .resolve_key_cols(.data, loc, .DOMAIN_VARIANTS, .COORD_VARIANTS,
+                                key_arg = "loc")
 
   age_col <- .pick_column(.data, "age",
                           prefer = c("age", "age_group", "agegroup"))
@@ -234,7 +240,8 @@ getMort <- function(.data, case, loc = NULL) {
     stop("Only accept data.frame INPUT.", call. = FALSE)
   }
   .check_scenario(.data, case)
-  loc_cols <- .resolve_key_cols(.data, loc, .DOMAIN_VARIANTS, .COORD_VARIANTS)
+  loc_cols <- .resolve_key_cols(.data, loc, .DOMAIN_VARIANTS, .COORD_VARIANTS,
+                                key_arg = "loc")
 
   age_col <- .pick_column(.data, "age",
                           prefer = c("age", "age_group", "agegroup"))

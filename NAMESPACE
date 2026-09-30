@@ -2,13 +2,11 @@
 
 export(Decomposition)
 export(Mortality)
-export(Mortality_batch)
 export(RR_std)
 export(aggregate_ci)
 export(aggregate_mortality)
 export(build_cr_table)
 export(build_grid_info)
-export(combine_batch)
 export(cr_models)
 export(domain_summary)
 export(getAge)

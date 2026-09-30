@@ -50,7 +50,8 @@ describe("Mortality(aggregate = ...)", {
 
   it("falls back to the whole field when aggregate = TRUE and mort_lvl is NULL", {
     expect_message(
-      agg <- .attr_run(aggregate = TRUE, mort_lvl = NULL),
+      expect_warning(agg <- .attr_run(aggregate = TRUE, mort_lvl = NULL),
+                     "mort_lvl"),
       "whole field"
     )
     expect_equal(nrow(agg), 1)
