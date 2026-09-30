@@ -211,7 +211,8 @@ Column names are matched heuristically when they are not already canonical
 | `Decomposition()` | driving-factor decomposition (24 permutations of population growth, ageing, exposure and other risk factors) |
 | `aggregate_mortality()`, `aggregate_ci()` | aggregate a result by domain and by endpoint/age, keeping MEAN/UP/LOW side by side |
 | `getConc()`, `getPop()`, `getAge()`, `getMort()` | pull one scenario out of a wide table |
-| `RR_std()`, `cr_models()` | concentration-response lookup tables and the list of valid model names |
+| `cr_config()` | the C-R model configuration: which lookup table a model uses, its concentration column and its endpoint×age metadata; shipped as JSON and replaceable by path |
+| `RR_std()`, `cr_models()` | concentration-response lookup tables and the list of valid model names (from the config, aliases included) |
 | `build_cr_table()` | build a lookup table from published coefficients — the entry point for a pollutant or endpoint set the package does not ship |
 | `matchable()` | render a numeric key as a fixed-precision string |
 
@@ -259,8 +260,12 @@ lexicographic order of `PG, PA, EXP, ORF` (the order documented in `?Decompositi
 
 `cr_models()` lists the accepted names: `GEMM`, `NCD+LRI`, `5COD`, `IER`,
 `IER2010`, `IER2013`, `IER2015`, `IER2017`, `MRBRT`, `MRBRT2019`,
-`MRBRT2021`, `O3`, `NO2`. Any other pollutant/endpoint combination can be
-passed to `Mortality(CRF = <data.frame>)` as long as it has the columns
+`MRBRT2021`, `O3`, `NO2`. What each name means — its lookup table,
+concentration column and endpoint×age set — comes from
+`cr_config()`, the JSON configuration shipped in `inst/extdata/cr_models.json`
+and replaceable with `cr_config = "<path>"`; `NO2` is all-cause, so its
+`mort_rate` endpoint is `allcause`. Any other pollutant/endpoint combination
+can be passed to `Mortality(CRF = <data.frame>)` as long as it has the columns
 `conc`, `endpoint`, `age`, `RR`.
 
 ## Methodology references

@@ -11,8 +11,9 @@
 | `Mortality.R` | `Mortality()` 编排（七阶段）、`.calc_attributable()` 计算核、聚合与区间接线、`.standardize_age_key()` |
 | `ingest.R` | `.check_input_files()`、`.ingest_single_input()`、`.ingest_and_map()`、`.align_raster_inputs()`、`.attach_admin()`、`.extract_scenario()` |
 | `utils.R` | `matchable()`、`getConc()`/`getPop()`/`getAge()`/`getMort()`、`.resolve_key_cols()`、`.pick_column()` |
-| `RR_std.R` | 内置查表注册表 `.CR_TABLE_REGISTRY`、`.match_ci()`、`.match_cr_model()`、`RR_std()`、`cr_models()` |
-| `schema-detect.R` | `.COLUMN_VARIANTS`、`.COLUMN_TARGET`、`.CR_ENDPOINTS`、`detect_columns()`、`validate_mortality_input()` |
+| `RR_std.R` | `.match_ci()`、`.match_cr_model()`、`.cr_lookup_load()`（rda/xlsx/csv 查表装载）、`RR_std()` |
+| `cr-config.R` | `cr_config()`、`cr_models()`、JSON 配置校验与 alias 解析（设计见 `diagnosis/design_json_crf_migration_260930.md`） |
+| `schema-detect.R` | `.COLUMN_VARIANTS`、`.COLUMN_TARGET`、`detect_columns()`、`validate_mortality_input()` |
 | `raster-io.R` | `raster_to_grid()`、`align_to_target()`、`.aggregate_pop()`、`shapefile_to_grid()`、`.resolve_target_res()` |
 | `grid-info.R` | `build_grid_info()` —— 把分析网格显式化、可落盘；内部复用 raster-io/ingest 的对齐与栅格化，不另写一套 |
 | `domain-summary.R` | `domain_summary()` —— 把栅格 conc/pop + 边界压成域级表（`conc_pwe`/`conc_mean`/`pop_total`/`n_cells`），供国家级（降维）分析喂回 `Mortality()` |
@@ -47,7 +48,7 @@
 ## 四、改前必读的内部契约
 
 - **列名映射方向**：`detect_columns()` 返回 `c(语义 = 实际列名)`，重命名必须是「实际 → 规范名」（查 `.COLUMN_TARGET` 表）。方向写反会把 `endpoint` 改成 `cause`，且会以列检查失败的形式暴露。
-- **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `RR_std()` 渲染，新模型必须登记进 `.CR_TABLE_REGISTRY`，否则数值/字符不一致会在 join 处报错。内置查表的原始 `conc` 列也须是字符键（`tests/testthat/test-RR_std.R` 会比对原始对象）。
+- **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `RR_std()` 渲染，新模型必须登记进配置（`inst/extdata/cr_models.json`，`lookup` 指定表/文件与端点年龄），否则数值/字符不一致会在 join 处报错。内置查表的原始 `conc` 列也须是字符键（`tests/testthat/test-RR_std.R` 会比对原始对象）。
 - **多波段栅格掩膜**：多情景栅格必须共享同一有效掩膜；`raster_to_grid()` 只保留所有层都有值的格子，某格只在部分层有值时**必须告警**并说明各层缺测数，不得静默收窄网格。
 - **人口栅格聚合**：`.aggregate_pop()` 先 `terra::aggregate(fun = "sum")` 再 resample，并核对总量；不要退回 `terra::resample(method = "sum")`（不守恒）。
 - **分辨率交互**：`.resolve_target_res()` 在非交互会话不得调用 `readline()`；> 1e9 格直接拒绝。
@@ -59,7 +60,7 @@
 - 只有公开 API 出现在 `man/`；内部函数用 `@noRd` 保留源码注释即可。
 - 新增导出：写 roxygen → `devtools::document()` → 确认 `man/` 只多出该函数一页。
 - 改口径或数据契约：**同一次提交内**同步 `tests/` 与 `NEWS.md`。
-- 若新增模型：`RR_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 必须同时更新（`tests/testthat/test-schema-detect.R` 会比对两者）。
+- 若新增模型：改 `inst/extdata/cr_models.json`（`lookup` + 端点年龄）+ 查表资产；`tests/testthat/test-cr-config.R` 会比对配置与实际 `RR_std()` 输出的端点年龄集合。
 
 ## 六、测试与回归装置
 
@@ -68,7 +69,7 @@
 | `test-Mortality.R` | 端到端：PWRR 校验、`conc_cf` 语义、三条 `mort_lvl` 分支、场景抽取、输入报错、随包示例数据 |
 | `test-RR_std.R` | 全部模型与 CI、年龄过滤、浓度键类型与精度 |
 | `test-utils.R` | `matchable()` 与四个 `get*()` |
-| `test-schema-detect.R` | 列名映射、阻断/告警校验、`.CR_ENDPOINTS` 与 `RR_std()` 一致性 |
+| `test-schema-detect.R` | 列名映射、阻断/告警校验、自定义配置端点比对 |
 | `test-raster-io.R` | 栅格转表、人口聚合守恒、分辨率选择、行政区栅格化、GeoTIFF 端到端 |
 | `test-uncertainty.R` | `aggregate`/`aggregate_by` 求和、`CI_LOW`/`CI_UP` range、`conc_uncert` 链 |
 | `test-aggregate.R` | `aggregate_mortality()`/`aggregate_ci()` 的列名解析与求和 |
@@ -78,6 +79,7 @@
 | `test-grid-info.R` | `build_grid_info()` 产物与三条路径等价、**骨架全错位报错 / 部分错位告警**（`validate = "off"` 全关）、`.rds`/`.csv` 往返、表格输入模式 |
 | `test-domain-summary.R` | `domain_summary()` 列与属性、域级骨架端到端、`Analysis grain:` 各分支文案、两种粒度差异（Jensen gap）钉住、`.rds`/`.csv` 往返 |
 | `test-Decomposition.R` | 24 种排列映射、起止点与单情景 `Mortality()` 逐行一致、单驱动差分等于前缀运行之差、望远镜加和、CI 分支透传、非法 `serie` 报错 |
+| `test-cr-config.R` | 默认配置装载、两种 ages 写法、alias 解析、配置↔`RR_std()` 端点年龄一致、非法配置逐类报错 |
 
 - 数值路径改动前后各跑一次指纹回归：设 `ATTRMORT_FINGERPRINTS=1` 跑 `devtools::test(filter = "fingerprints")`（用 `=update` 重写参照）；参照指纹在 `tests/testthat/fixtures/fingerprints/`。
 - 测试只放在 `tests/testthat/`；手工脚本放 `data-raw/`，因为 `R CMD check` 会执行 `tests/` 下每个 `.R`。
@@ -97,4 +99,4 @@
 4. **`aggregate_ci()` 与 `Mortality(uncertain = TRUE)` 的边界**：前者要求调用方自带 `_MEAN/_UP/_LOW` 后缀，后者直接给区间；若将来让 `Mortality()` 一次输出三支并加后缀，需明确两者分工。
 5. **独立误差口径**：若需要「每格误差独立」的抽样区间，可增加 `ci_method = "quadrature"`（现有 range 口径为共模假设）。
 6. **vignette 未写**：`vignettes/` 为空，除 README 外没有教程。
-7. **JSON C-R 配置迁移（进行中）**：把 PM2.5-attr-mort v5 的“模型名 → JSON 元数据 → 查表”机制移植进 AttrMort，替换 `.CR_TABLE_REGISTRY`、`RR_std()` 的硬编码 reshape 分支与 `.CR_ENDPOINTS`。设计见 `diagnosis/design_json_crf_migration_260930.md`（分支 `refactor/json-crf-migration`）；待拍板口径（查表载体、越界浓度、LRI 年龄等）确认后按 P0–P4 实施，完成后删除本条。
+7. **JSON C-R 配置迁移（P0–P2 已完成，P3–P4 待做）**：内置 13 个模型名已由 `inst/extdata/cr_models.json` 驱动，`.CR_TABLE_REGISTRY`、`RR_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 已删除；NO<sub>2</sub> 端点按拍板改为 `allcause`（对应查表前缀 `cause`，指纹参照已更新、数值不变）。待做：P3 自定义 xlsx/csv 查表的端到端测试、P4 文档收尾。设计见 `diagnosis/design_json_crf_migration_260930.md`，完成后删除本条。

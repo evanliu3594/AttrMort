@@ -25,7 +25,8 @@ Mortality(
   aggregate_by = "total",
   uncertain = FALSE,
   conc_uncert = 0,
-  chunk_ages = NULL
+  chunk_ages = NULL,
+  cr_config = NULL
 )
 }
 \arguments{
@@ -135,6 +136,10 @@ relative risk is computed per (domain, endpoint, age) and the per-cell
 burden is element-wise — and it is what keeps a 0.1 degree global run
 inside 32 GB. It applies to the central estimate and to the
 `uncertain`/`conc_uncert` chains alike.}
+
+\item{cr_config}{Optional configuration from [cr_config()], or a path to a
+JSON config, used when `CRF` is a model name. `NULL` (default) uses the
+shipped configuration. Ignored for a data.frame `CRF`.}
 }
 \value{
 A data.frame. At grid level (`aggregate = NULL`) it carries the key

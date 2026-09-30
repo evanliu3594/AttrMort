@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "models": {
+    "GEMM": {
+      "label": "PM2.5_GEMM_NCD+LRI",
+      "aliases": ["NCD+LRI"],
+      "lookup": { "kind": "rda", "table": "GEMM_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "ncd+lri", "ages": { "from": 25, "to": 95, "by": 5 } }
+      ]
+    },
+    "5COD": {
+      "label": "PM2.5_GEMM_5COD",
+      "lookup": { "kind": "rda", "table": "GEMM_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } }
+      ]
+    },
+    "IER2017": {
+      "label": "PM2.5_IER2017",
+      "aliases": ["IER"],
+      "lookup": { "kind": "rda", "table": "IER2017_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": [0] }
+      ]
+    },
+    "IER2015": {
+      "label": "PM2.5_IER2015",
+      "lookup": { "kind": "rda", "table": "IER2015_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": [0] }
+      ]
+    },
+    "IER2013": {
+      "label": "PM2.5_IER2013",
+      "lookup": { "kind": "rda", "table": "IER2013_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": [0] }
+      ]
+    },
+    "IER2010": {
+      "label": "PM2.5_IER2010",
+      "lookup": { "kind": "rda", "table": "IER2010_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": [0] }
+      ]
+    },
+    "MRBRT2021": {
+      "label": "PM2.5_MRBRT2021",
+      "aliases": ["MRBRT"],
+      "lookup": { "kind": "rda", "table": "MRBRT2021_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "dm2",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } }
+      ]
+    },
+    "MRBRT2019": {
+      "label": "PM2.5_MRBRT2019",
+      "lookup": { "kind": "rda", "table": "MRBRT2019_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd",   "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "dm2",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "ihd",    "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lc",     "ages": { "from": 25, "to": 95, "by": 5 } },
+        { "name": "lri",    "ages": [0] },
+        { "name": "stroke", "ages": { "from": 25, "to": 95, "by": 5 } }
+      ]
+    },
+    "O3": {
+      "label": "PM2.5_O3_COPD",
+      "lookup": { "kind": "rda", "table": "O3_CR_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "copd", "ages": { "from": 25, "to": 95, "by": 5 } }
+      ]
+    },
+    "NO2": {
+      "label": "PM2.5_NO2_AllCause",
+      "lookup": { "kind": "rda", "table": "NO2_CR_Lookup_Table" },
+      "conc_col": "conc",
+      "endpoints": [
+        { "name": "allcause", "lookup": "cause",
+          "ages": { "from": 15, "to": 95, "by": 5 } }
+      ]
+    }
+  }
+}

@@ -83,16 +83,6 @@ describe("canonical column names", {
   })
 })
 
-describe(".CR_ENDPOINTS stays in sync with RR_std()", {
-  it("declares exactly the endpoints each model can produce", {
-    for (model in cr_models()) {
-      declared <- AttrMort:::.CR_ENDPOINTS[[model]]
-      produced <- unique(RR_std(model, "MEAN")$endpoint)
-      expect_setequal(produced, declared)
-    }
-  })
-})
-
 describe("validate_mortality_input()", {
   it("returns an empty report for clean inputs", {
     d <- .attr_small_long()

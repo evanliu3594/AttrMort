@@ -90,7 +90,7 @@ describe("shipped example data", {
     mort <- .attr_data("national_mortality")
     expect_setequal(
       unique(mort$endpoint),
-      c("ncd+lri", "copd", "ihd", "lc", "lri", "stroke", "dm2", "cause")
+      c("ncd+lri", "copd", "ihd", "lc", "lri", "stroke", "dm2", "allcause")
     )
   })
 

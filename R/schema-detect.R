@@ -4,24 +4,9 @@
 # their output has to be quiet when the data is fine and specific when it is
 # not.
 
-# Disease endpoints each CR model can use. Kept in sync with the reshape
-# branches of RR_std(); tests/testthat/test-schema-detect.R pins the two
-# together.
-.CR_ENDPOINTS <- list(
-  `5COD`    = c("copd", "ihd", "lc", "lri", "stroke"),
-  `NCD+LRI` = "ncd+lri",
-  GEMM      = "ncd+lri",
-  IER       = c("copd", "ihd", "lc", "stroke", "lri"),
-  IER2010   = c("copd", "ihd", "lc", "stroke", "lri"),
-  IER2013   = c("copd", "ihd", "lc", "stroke", "lri"),
-  IER2015   = c("copd", "ihd", "lc", "stroke", "lri"),
-  IER2017   = c("copd", "ihd", "lc", "stroke", "lri"),
-  MRBRT     = c("copd", "dm2", "ihd", "lc", "lri", "stroke"),
-  MRBRT2019 = c("copd", "dm2", "ihd", "lc", "lri", "stroke"),
-  MRBRT2021 = c("copd", "dm2", "ihd", "lc", "lri", "stroke"),
-  O3        = "copd",
-  NO2       = "cause"
-)
+# The endpoints each CR model can use now live in the C-R configuration
+# (inst/extdata/cr_models.json, read through cr_config()) instead of being
+# duplicated here.
 
 # Standard 5-year age strata used by the lookup tables.
 .STD_AGE_GROUPS <- as.character(seq(0, 95, 5))
@@ -121,7 +106,8 @@ validate_mortality_input <- function(data_list,
                                      cr_model      = NA_character_,
                                      age_tolerance = 0.01,
                                      max_rate      = 5e4,
-                                     dgt_conc      = 1) {
+                                     dgt_conc      = 1,
+                                     config        = NULL) {
   issues   <- character(0)
   blocking <- character(0)
 
@@ -175,24 +161,29 @@ validate_mortality_input <- function(data_list,
     }
 
     cause_col <- intersect(c("cause", "endpoint"), mort_cols)
-    if (length(cause_col) > 0 && !is.na(cr_model) &&
-        cr_model %in% names(.CR_ENDPOINTS)) {
-      actual   <- unique(tolower(as.character(mort[[cause_col[1]]])))
-      expected_ep <- .CR_ENDPOINTS[[cr_model]]
-      absent <- setdiff(expected_ep, actual)
-      extra  <- setdiff(actual, expected_ep)
+    if (length(cause_col) > 0 && !is.na(cr_model) && nzchar(cr_model)) {
+      entry <- tryCatch(
+        .cr_model_entry(.as_cr_config(config), cr_model),
+        error = function(e) NULL
+      )
+      if (!is.null(entry)) {
+        actual   <- unique(tolower(as.character(mort[[cause_col[1]]])))
+        expected_ep <- vapply(entry$endpoints, `[[`, "", "name")
+        absent <- setdiff(expected_ep, actual)
+        extra  <- setdiff(actual, expected_ep)
 
-      if (length(absent) == length(expected_ep)) {
-        blockf("mort_rate: none of the endpoints used by %s (%s) are present",
-               cr_model, paste(expected_ep, collapse = ", "))
-      } else if (length(absent) > 0) {
-        warnf("mort_rate: endpoint(s) used by %s but absent: %s",
-              cr_model, paste(absent, collapse = ", "))
-      }
-      if (length(extra) > 0) {
-        message("mort_rate: ", length(extra), " endpoint(s) are not used by ",
-                cr_model, " (", paste(extra, collapse = ", "),
-                "); they will not contribute to the result.")
+        if (length(absent) == length(expected_ep)) {
+          blockf("mort_rate: none of the endpoints used by %s (%s) are present",
+                 cr_model, paste(expected_ep, collapse = ", "))
+        } else if (length(absent) > 0) {
+          warnf("mort_rate: endpoint(s) used by %s but absent: %s",
+                cr_model, paste(absent, collapse = ", "))
+        }
+        if (length(extra) > 0) {
+          message("mort_rate: ", length(extra), " endpoint(s) are not used by ",
+                  cr_model, " (", paste(extra, collapse = ", "),
+                  "); they will not contribute to the result.")
+        }
       }
     }
   }

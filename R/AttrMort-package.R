@@ -18,8 +18,8 @@
 #'   domain, with an optional uncertainty range
 #' * [Decomposition()] — driving-factor decomposition
 #' * [aggregate_mortality()], [aggregate_ci()] — post-hoc aggregation
-#' * [build_cr_table()], [RR_std()], [cr_models()] — concentration-response
-#'   tables
+#' * [cr_config()], [build_cr_table()], [RR_std()], [cr_models()] —
+#'   concentration-response configuration and tables
 #' * [getConc()], [getPop()], [getAge()], [getMort()] — wide-to-long helpers
 #' * [matchable()] — join-key rounding helper
 #'

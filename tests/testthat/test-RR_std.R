@@ -56,7 +56,7 @@ describe("RR_std()", {
 
   it("returns only COPD for O3 and only all-cause for NO2", {
     expect_equal(unique(RR_std("O3", "MEAN")$endpoint), "copd")
-    expect_equal(unique(RR_std("NO2", "MEAN")$endpoint), "cause")
+    expect_equal(unique(RR_std("NO2", "MEAN")$endpoint), "allcause")
   })
 
   it("returns all three CI tables for every model", {

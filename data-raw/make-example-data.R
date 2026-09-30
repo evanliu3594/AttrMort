@@ -16,7 +16,7 @@ dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 countries  <- c("Aland", "Borduria", "Cyrenia")
 scenarios  <- c("base2015", "scenario2030")
 ages       <- as.character(seq(0, 95, 5))
-endpoints  <- c("ncd+lri", "copd", "ihd", "lc", "lri", "stroke", "dm2", "cause")
+endpoints  <- c("ncd+lri", "copd", "ihd", "lc", "lri", "stroke", "dm2", "allcause")
 
 ## ── 网格与地理信息 ──────────────────────────────────────────────────────
 res  <- 0.25

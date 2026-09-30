@@ -310,6 +310,9 @@
 #'   burden is element-wise — and it is what keeps a 0.1 degree global run
 #'   inside 32 GB. It applies to the central estimate and to the
 #'   `uncertain`/`conc_uncert` chains alike.
+#' @param cr_config Optional configuration from [cr_config()], or a path to a
+#'   JSON config, used when `CRF` is a model name. `NULL` (default) uses the
+#'   shipped configuration. Ignored for a data.frame `CRF`.
 #'
 #' @section Uncertainty:
 #' The interval is a **range**, not a sampling interval. The same low/high
@@ -381,11 +384,18 @@ Mortality <- function(
     aggregate_by = "total",
     uncertain    = FALSE,
     conc_uncert  = 0,
-    chunk_ages   = NULL
+    chunk_ages   = NULL,
+    cr_config    = NULL
 ) {
   validate     <- match.arg(validate)
   aggregate_by <- match.arg(aggregate_by, c("total", "endpoint", "age", "all"))
   CI           <- .match_ci(CI)
+
+  # The C-R metadata (lookup, endpoints, ages) comes from the config when CRF
+  # names a model; a data.frame CRF carries everything itself.
+  config   <- if (is.character(CRF)) .as_cr_config(cr_config) else NULL
+  crf_name <- if (is.character(CRF)) .match_cr_model(CRF, config) else
+    NA_character_
 
   if (!is.null(aggregate) && !isTRUE(aggregate) && !is.character(aggregate)) {
     stop("`aggregate` must be NULL, TRUE, or a character vector of columns.",
@@ -542,8 +552,9 @@ Mortality <- function(
     report <- validate_mortality_input(
       list(conc = conc_real, pop = pop_total, age_struc = age_struc,
            mort_rate = mort_rate),
-      cr_model = if (is.character(CRF)) .match_cr_model(CRF) else NA_character_,
-      dgt_conc = dgt_conc
+      cr_model = crf_name,
+      dgt_conc = dgt_conc,
+      config   = config
     )
     if (!report$valid && validate == "stop") {
       stop("Input validation failed:\n  - ",
@@ -573,7 +584,8 @@ Mortality <- function(
   # them without the others.
   compute <- function(ci, conc_r = conc_real, conc_c = conc_cf) {
     .calc_attributable_ages(calc_fild, conc_r, conc_c, pop_total, age_struc,
-                            mort_rate, mort_lvl, CRF, ci, chunk_ages)
+                            mort_rate, mort_lvl, CRF, ci, chunk_ages,
+                            config = config, dgt_conc = dgt_conc)
   }
 
   grid     <- compute(CI)
@@ -761,14 +773,20 @@ Mortality <- function(
 # are joined on the grid keys -- never cbind()ed.
 .calc_attributable_ages <- function(calc_fild, conc_real, conc_cf, pop_total,
                                     age_struc, mort_rate, mort_lvl, CRF, CI,
-                                    chunk_ages = NULL) {
-  RR_tbl <- if (is.data.frame(CRF)) CRF else RR_std(.match_cr_model(CRF), CI)
+                                    chunk_ages = NULL, config = NULL,
+                                    dgt_conc = 1) {
+  RR_tbl <- if (is.data.frame(CRF)) {
+    CRF
+  } else {
+    RR_std(.match_cr_model(CRF, config), CI, dgt = dgt_conc, config = config)
+  }
   ages   <- .chunkable_ages(mort_rate, RR_tbl)
 
   if (length(ages) == 0) {
     # No shared age stratum: leave the report to .calc_attributable().
     return(.calc_attributable(calc_fild, conc_real, conc_cf, pop_total,
-                              age_struc, mort_rate, mort_lvl, CRF, CI))
+                              age_struc, mort_rate, mort_lvl, CRF, CI,
+                              config = config, dgt_conc = dgt_conc))
   }
 
   size   <- .resolve_chunk_ages(chunk_ages, nrow(calc_fild), length(ages),
@@ -783,7 +801,8 @@ Mortality <- function(
       calc_fild, conc_real, conc_cf, pop_total,
       age_struc |> filter(.standardize_age_key(age) %in% block),
       mort_rate |> filter(.standardize_age_key(age) %in% block),
-      mort_lvl, CRF, CI, warn = i == 1L
+      mort_lvl, CRF, CI, warn = i == 1L, config = config,
+      dgt_conc = dgt_conc
     )
   })
 
@@ -819,9 +838,40 @@ Mortality <- function(
 # for the whole run.
 .calc_attributable <- function(calc_fild, conc_real, conc_cf, pop_total,
                                age_struc, mort_rate, mort_lvl, CRF, CI,
-                               warn = TRUE) {
-  crf_label <- if (is.character(CRF)) .match_cr_model(CRF) else "user-supplied"
-  RR_tbl <- if (is.data.frame(CRF)) CRF else RR_std(crf_label, CI)
+                               warn = TRUE, config = NULL, dgt_conc = 1) {
+  crf_label <- if (is.character(CRF)) {
+    .match_cr_model(CRF, config)
+  } else {
+    "user-supplied"
+  }
+  RR_tbl <- if (is.data.frame(CRF)) {
+    CRF
+  } else {
+    RR_std(crf_label, CI, dgt = dgt_conc, config = config)
+  }
+
+  # Out-of-range exposures simply never join the lookup key. Say how many
+  # values that affects instead of letting them disappear in na.omit().
+  if (warn && nrow(RR_tbl) > 0) {
+    rng <- range(as.numeric(RR_tbl$conc), na.rm = TRUE)
+    checked <- NULL
+    for (nm in c("conc_real", "conc_cf")) {
+      df <- if (identical(nm, "conc_real")) conc_real else conc_cf
+      if (!is.data.frame(df) || !"conc" %in% names(df)) next
+      v <- suppressWarnings(as.numeric(df$conc))
+      if (!is.null(checked) && identical(v, checked)) next
+      checked <- v
+      n_out <- sum(!is.na(v) & (v < rng[1] | v > rng[2]))
+      if (n_out > 0) {
+        warning(
+          n_out, " value(s) in `", nm, "` fall outside the CRF lookup range [",
+          format(rng[1]), ", ", format(rng[2]),
+          "] and are dropped by the join; they contribute nothing to the result.",
+          call. = FALSE
+        )
+      }
+    }
+  }
 
   # Canonicalise the join keys of the tabular inputs.
   mort_rate <- mort_rate |>

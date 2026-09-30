@@ -4,11 +4,11 @@
 \alias{RR_std}
 \title{Standardize a concentration-response lookup table}
 \usage{
-RR_std(CR_Model, index = "MEAN", dgt = 1)
+RR_std(CR_Model, index = "MEAN", dgt = 1, config = NULL)
 }
 \arguments{
 \item{CR_Model}{Character. CR model name; see [cr_models()] for the
-accepted values. Matched case-insensitively.}
+accepted values. Matched case-insensitively, aliases included.}
 
 \item{index}{Character. Which table to use: `"MEAN"` (default), `"UP"` or
 `"LOW"`. `"UPPER"` and `"LOWER"` are accepted as aliases.}
@@ -16,16 +16,22 @@ accepted values. Matched case-insensitively.}
 \item{dgt}{Integer. Decimal places used to render the concentration keys.
 Must match the precision used for the exposure side (`dgt_conc` in
 [Mortality()]). Default 1.}
+
+\item{config}{Optional configuration from [cr_config()], or a path to a
+JSON config. `NULL` (default) uses the shipped config.}
 }
 \value{
 A data.frame with columns `conc` (character), `endpoint`,
   `age` (character) and `RR`.
 }
 \description{
-Turns a built-in wide lookup table into a join-ready long table with one
-row per concentration, endpoint and age group. The concentration axis is
-rendered as character keys (`matchable()` precision `dgt`) so that it can
-be joined against exposure data regardless of how that data is stored.
+Turns the wide lookup table of one configured model into a join-ready long
+table with one row per concentration, endpoint and age group. The endpoints,
+their applicable ages and the lookup location come from [cr_config()];
+ages without their own column fall back to the endpoint's `_ALL` column.
+The concentration axis is rendered as character keys (`matchable()`
+precision `dgt`) so that it can be joined against exposure data regardless
+of how that data is stored.
 }
 \examples{
 head(RR_std("GEMM", "MEAN"))

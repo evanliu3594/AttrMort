@@ -56,6 +56,26 @@ describe("Mortality() on the small fixture", {
     expect_equal(nrow(out), 1)
   })
 
+  it("warns about concentrations outside the CRF lookup range", {
+    d <- .attr_small_long()
+    d$conc_real$conc[3] <- "400"          # GEMM lookup ends at 300
+    warns <- character(0)
+    out <- withCallingHandlers(
+      Mortality(
+        CRF = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
+        pop_total = d$pop_total, age_struc = d$age_struc,
+        mort_rate = d$mort_rate, mort_lvl = "location", validate = "off"
+      ),
+      warning = function(w) {
+        warns <<- c(warns, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    )
+    expect_true(any(grepl("outside the CRF lookup range", warns)))
+    expect_true(any(grepl("`conc_real`", warns)))
+    expect_equal(nrow(out), 3)            # the out-of-range cell is dropped
+  })
+
   it("uses conc_cf for the risk term while conc_real drives the PWRR", {
     d    <- .attr_small_long()
     base <- .attr_run()

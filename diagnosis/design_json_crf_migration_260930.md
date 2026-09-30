@@ -125,7 +125,8 @@ PM2.5-attr-mort v5 已把这一层数据化：`Data/RR_std_config.json` 按模�
 | `models[].lookup.sheets` | 否 | xlsx sheet 名映射；默认 `MEAN/LOW/UP` |
 | `models[].conc_col` | 否 | 查表侧的浓度列名；默认 `conc`；装载后统一改名 `conc` |
 | `models[].endpoints[].name` | 是 | 规范化端点名（小写，AttrMort 契约） |
-| `models[].endpoints[].ages` | 是 | 该端点适用的年龄字符向量（5 岁分层，不含 `ALL`） |
+| `models[].endpoints[].lookup` | 否 | 查表里的列前缀；默认等于 `name`。用于暴露名与查表前缀不同名（如 `allcause` <- `CAUSE`） |
+| `models[].endpoints[].ages` | 是 | 该端点适用的年龄字符向量（5 岁分层，不含 `ALL`）；支持数组或 `{from,to,by}` 范围对象 |
 
 ### 3.3 校验规则（装载期硬报错）
 
@@ -305,3 +306,25 @@ C-R 侧不引入新公式，只是“同一公式、元数据外置”。沿用 
 | `NO2` | `NO2_CR_Lookup_Table` | `cause`: 15–95 |
 
 注：`MRBRT` 与 `MRBRT2021` 共用同一张表，`IER` 是 `IER2017` 的别名；`NCD+LRI` 共用 GEMM 表。P0 写默认配置时直接以本表为准（年龄升序、5 岁步长、端点小写）。
+
+## 补记一（2026-09-30，P0–P2 实施记录）
+
+**拍板结果。** U1=A（内置保持 rda + JSON 元数据）；U2=A（不钳制，丢行但明确告警）；U3=A（配置逐字复刻 AttrMort 现状语义）；**U4=B（NO₂ 端点由 `cause` 改为 `allcause`，属破坏性变更）**；U5=A（PWRR 保持域×端点×年龄）；U6/U7/U8 按建议（只读配置；`Mortality(..., cr_config=)`；label 先只进配置）。U9 仍暂缓。
+
+**相对设计稿的实现补充。**
+
+- endpoint 级新增可选 `lookup` 字段（暴露名 ↔ 查表列前缀映射），NO₂ 用 `allcause` <- `CAUSE`；查表资产无需改名。
+- `csv` 载体的语义定为“目录”：`lookup.path` 指向目录，默认读 `MEAN.csv/LOW.csv/UP.csv`，`sheets` 可覆盖文件名；`xlsx` 的 `sheets` 覆盖 sheet 名。
+- 校验分两段：`cr_config()` 做结构与取值校验（§3.3 前 4、6、7 条）；“查表文件/对象存在、列齐全、conc 可数值化”在装载期（`RR_std()` 调用时）检查，错误带查表来源与分支名。
+- U2 落地：核内新增“N 个值超出查表范围 [a,b]，将被 join 丢弃”的告警（`conc_real`/`conc_cf` 同值时只报一次），默认行为与 0.3.0 一致；同时修复 `dgt_conc` 未传入 `RR_std()` 的旧缺口（`dgt_conc ≠ 1` 时两侧键精度会不一致）。
+- `Mortality()` 的 `cr_config=` 追加在参数表末尾，既有位置参数不受影响；`validate_mortality_input()` 新增 `config=`。
+
+**已完成阶段。**
+
+| 阶段 | 产出 | 验收 |
+|---|---|---|
+| P0 | `inst/extdata/cr_models.json`（10 个规范模型 + 3 个别名，复刻附录 A）；`R/cr-config.R`（`cr_config()`/`cr_models()`/`print` + 校验）；`tests/testthat/test-cr-config.R` | 结构校验逐类报错（schema 版本、未知字段、空端点、非法 ages、alias 冲突、重复端点、字段路径） |
+| P1 | 配置驱动的通用 `RR_std()`（`R/RR_std.R`：pivot → 按配置展开 → fill(ALL) → 过滤；`.cr_lookup_load()` 支持 rda/xlsx/csv） | 39 个模型×CI 与冻结的 0.3.0 输出逐行 `all.equal` 全 TRUE（NO₂ 端点改名除外） |
+| P2 | 删除 `.CR_TABLE_REGISTRY`、6 个 reshape 分支、`.CR_ENDPOINTS` 与同步测试；`validate_mortality_input()` 读配置；NO₂ 端点改名并同步示例数据的 `national_mortality.xlsx` 与 `crf-NO2.csv` 指纹（列名前缀变化、数值逐位不变） | 全量测试 `FAIL 0 / WARN 0`；指纹 42 全过；`R CMD check` `Status: OK`（0/0/0） |
+
+**待做（P3–P4）。** 自定义 xlsx/csv 查表的端到端测试（配置相对路径解析、缺 sheet/缺列错误）；`Mortality(cr_config=)` 端到端；README/vignette 收尾；`NEWS.md` 与版本号按用户既有指示未动，发布前需补记破坏性变更（NO₂ 端点改名、`cr_models()` 现在含别名且来自配置）。
