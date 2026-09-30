@@ -49,6 +49,7 @@
 
 - **列名映射方向**：`detect_columns()` 返回 `c(语义 = 实际列名)`，重命名必须是「实际 → 规范名」（查 `.COLUMN_TARGET` 表）。方向写反会把 `endpoint` 改成 `cause`，且会以列检查失败的形式暴露。
 - **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `RR_std()` 渲染，新模型必须登记进配置（`inst/extdata/cr_models.json`，`lookup` 指定表/文件与端点年龄），否则数值/字符不一致会在 join 处报错。内置查表的原始 `conc` 列也须是字符键（`tests/testthat/test-RR_std.R` 会比对原始对象）。
+- **查表年龄继承**：`RR_std()` 对缺列年龄按“继承前一个年龄”处理（从 `_ALL` 行开始）——GEMM 的 85/90/95 继承 80、MRBRT 的 `_ALL` 表全程继承 ALL，均由指纹钉住；装载校验要求每个端点至少存在“首个年龄列或 `_ALL` 列”（`R/RR_std.R` 的 `.cr_lookup_check()`）。改动该逻辑前先跑 39 表对照与指纹（见 `diagnosis/code_review_260930.md`）。
 - **多波段栅格掩膜**：多情景栅格必须共享同一有效掩膜；`raster_to_grid()` 只保留所有层都有值的格子，某格只在部分层有值时**必须告警**并说明各层缺测数，不得静默收窄网格。
 - **人口栅格聚合**：`.aggregate_pop()` 先 `terra::aggregate(fun = "sum")` 再 resample，并核对总量；不要退回 `terra::resample(method = "sum")`（不守恒）。
 - **分辨率交互**：`.resolve_target_res()` 在非交互会话不得调用 `readline()`；> 1e9 格直接拒绝。

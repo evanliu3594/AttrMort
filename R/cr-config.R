@@ -111,6 +111,22 @@
     if (!is.list(lookup$sheets) || length(lookup$sheets) < 1) {
       .cr_field_error(paste0(field, ".sheets"), "must be a non-empty object")
     }
+    if (kind == "rda") {
+      .cr_field_error(paste0(field, ".sheets"),
+                      "is only used for xlsx/csv lookups")
+    }
+    bad_keys <- setdiff(names(lookup$sheets), c("MEAN", "LOW", "UP"))
+    if (length(bad_keys) > 0) {
+      .cr_field_error(paste0(field, ".sheets"),
+                      paste0("unknown branch(es): ", paste(bad_keys, collapse = ", ")))
+    }
+    for (branch in names(lookup$sheets)) {
+      v <- lookup$sheets[[branch]]
+      if (!is.character(v) || length(v) != 1 || !nzchar(v)) {
+        .cr_field_error(paste0(field, ".sheets.", branch),
+                        "must be a single non-empty string")
+      }
+    }
   }
   list(kind = kind, table = lookup$table, path = lookup$path,
        sheets = lookup$sheets)
@@ -155,7 +171,7 @@
   out
 }
 
-.cr_normalise <- function(raw, path) {
+.cr_normalise <- function(raw) {
   if (!is.list(raw)) {
     .cr_field_error("root", "must be a JSON object")
   }
@@ -194,6 +210,9 @@
     if (length(aliases) > 0) {
       if (!is.character(aliases) || any(!nzchar(aliases))) {
         .cr_field_error(paste0(f, ".aliases"), "must be non-empty strings")
+      }
+      if (anyDuplicated(toupper(aliases)) > 0) {
+        .cr_field_error(paste0(f, ".aliases"), "contains duplicates")
       }
       clash <- aliases[toupper(aliases) %in% c(toupper(names(models)),
                                                toupper(alias_owner))]
@@ -263,6 +282,9 @@ cr_config <- function(path = NULL) {
     if (!file.exists(path)) {
       stop("CR config not found: ", path, call. = FALSE)
     }
+    if (dir.exists(path)) {
+      stop("CR config path is a directory, not a file: ", path, call. = FALSE)
+    }
   }
 
   raw <- tryCatch(
@@ -272,7 +294,7 @@ cr_config <- function(path = NULL) {
            call. = FALSE)
     }
   )
-  models <- .cr_normalise(raw, path)
+  models <- .cr_normalise(raw)
   structure(
     list(schema_version = .cr_schema_version, models = models,
          path = normalizePath(path, mustWork = FALSE)),

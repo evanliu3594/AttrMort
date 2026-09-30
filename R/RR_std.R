@@ -6,9 +6,11 @@
 #
 # Lookups are `list(MEAN, LOW, UP)` of wide data.frames carrying a
 # concentration column (`conc` for the shipped rda tables, `conc_col` for
-# user-supplied files) plus one `{endpoint}_{age}` column per stratum. Ages
-# not present as a column fall back to the endpoint's `_ALL` column, which is
-# what keeps the GEMM/MRBRT `_ALL`-only tables working.
+# user-supplied files) plus one `{endpoint}_{age}` column per stratum. An age
+# without its own column inherits the nearest previous age, starting from the
+# endpoint's `_ALL` row when it exists: that keeps the `_ALL`-only tables
+# (MRBRT2021) working and reproduces GEMM's 85/90/95 <- 80 semantics, both
+# pinned by the fingerprints.
 
 # Canonicalise a user-supplied CI / index label.
 .match_ci <- function(index) {
@@ -37,8 +39,9 @@
 }
 
 # Resolve a lookup path relative to the config file (never the cwd).
+# Accepts POSIX-absolute, drive-letter-absolute and UNC paths.
 .cr_lookup_path <- function(path, config) {
-  if (grepl("^(/|[A-Za-z]:[\\\\/])", path)) {
+  if (grepl("^(/|[A-Za-z]:[\\\\/]|\\\\\\\\|//)", path)) {
     return(path)
   }
   file.path(dirname(config$path), path)
@@ -53,6 +56,8 @@
       call. = FALSE
     )
   }
+
+  value_cols <- NULL
   for (branch in c("MEAN", "LOW", "UP")) {
     df <- tab[[branch]]
     if (!is.data.frame(df)) {
@@ -72,12 +77,42 @@
       stop("Lookup ", source, " branch ", branch,
            " has a non-numeric concentration column.", call. = FALSE)
     }
-    if (length(setdiff(names(df), "conc")) == 0) {
+    cols <- setdiff(names(df), "conc")
+    if (length(cols) == 0) {
       stop("Lookup ", source, " branch ", branch,
            " has no endpoint-age columns.", call. = FALSE)
     }
+    if (is.null(value_cols)) {
+      value_cols <- cols
+    } else if (!identical(sort(value_cols), sort(cols))) {
+      stop("Lookup ", source, " branches do not share the same columns; ",
+           "MEAN has ", length(value_cols), " and ", branch, " has ",
+           length(cols), ".", call. = FALSE)
+    }
     tab[[branch]] <- df
   }
+
+  # Every configured endpoint must be anchored: its first configured age needs
+  # its own `{prefix}_{age}` column or the endpoint needs a `{prefix}_ALL`
+  # column to inherit from. Later ages may intentionally inherit the previous
+  # age's value (GEMM 85/90/95 <- 80), but an endpoint with no anchor at all
+  # would silently produce NA relative risks.
+  cols_low <- tolower(value_cols)
+  for (ep in entry$endpoints) {
+    prefix  <- tolower(ep$lookup)
+    has_all <- paste0(prefix, "_all") %in% cols_low
+    first   <- paste0(prefix, "_", ep$ages[1]) %in% cols_low
+    if (!has_all && !first) {
+      stop(
+        "Lookup ", source, " has no columns for endpoint \"", prefix,
+        "\" of model \"", entry$name, "\" (needs \"", prefix, "_",
+        ep$ages[1], "\" or \"", prefix, "_ALL\"). Available columns: ",
+        paste(value_cols, collapse = ", "), ".",
+        call. = FALSE
+      )
+    }
+  }
+
   tab
 }
 
@@ -107,7 +142,13 @@
     }
     read_branch <- function(branch) {
       sheet <- if (!is.null(lk$sheets[[branch]])) lk$sheets[[branch]] else branch
-      as.data.frame(readxl::read_excel(path, sheet = sheet))
+      tryCatch(
+        as.data.frame(readxl::read_excel(path, sheet = sheet)),
+        error = function(e) {
+          stop("Cannot read sheet \"", sheet, "\" (branch ", branch,
+               ") from ", path, ": ", conditionMessage(e), call. = FALSE)
+        }
+      )
     }
   } else {
     if (!dir.exists(path)) {
@@ -139,11 +180,12 @@
 #'
 #' Turns the wide lookup table of one configured model into a join-ready long
 #' table with one row per concentration, endpoint and age group. The endpoints,
-#' their applicable ages and the lookup location come from [cr_config()];
-#' ages without their own column fall back to the endpoint's `_ALL` column.
-#' The concentration axis is rendered as character keys (`matchable()`
-#' precision `dgt`) so that it can be joined against exposure data regardless
-#' of how that data is stored.
+#' their applicable ages and the lookup location come from [cr_config()].
+#' An age without its own column inherits the nearest previous age (the
+#' `_ALL` row when that is the only one), which is how the shipped GEMM and
+#' MRBRT tables are defined. The concentration axis is rendered as character
+#' keys (`matchable()` precision `dgt`) so that it can be joined against
+#' exposure data regardless of how that data is stored.
 #'
 #' @param CR_Model Character. CR model name; see [cr_models()] for the
 #'   accepted values. Matched case-insensitively, aliases included.
@@ -180,6 +222,9 @@ RR_std <- function(CR_Model, index = "MEAN", dgt = 1, config = NULL) {
 
   # One expansion per configured endpoint; the exposed `endpoint` name may
   # differ from the lookup column prefix (`lookup`), e.g. allcause <- CAUSE.
+  # Ages without their own column inherit the nearest previous age (the `_ALL`
+  # column when that is the only one): this is the shipped tables' semantics
+  # (e.g. GEMM 85/90/95 use age 80's RR), pinned by the fingerprints.
   grid <- lapply(entry$endpoints, function(ep) {
     expand_grid(
       conc     = wide$conc,
@@ -203,9 +248,22 @@ RR_std <- function(CR_Model, index = "MEAN", dgt = 1, config = NULL) {
       RR
     )
 
+  # Configured ages that neither have a column nor an `_ALL` fallback are
+  # caught at load time; this is the last line of defence against a lookup
+  # that slips through (e.g. a missing `_ALL` column).
+  if (anyNA(out$RR)) {
+    hole <- out[which(is.na(out$RR))[1], ]
+    stop(
+      "Model \"", entry$name, "\": the lookup has no RR value for endpoint \"",
+      hole$endpoint, "\" at age ", hole$age, ". Add that age's column or an \"",
+      toupper(hole$endpoint), "_ALL\" column to the lookup.",
+      call. = FALSE
+    )
+  }
+
   # Stable order: concentration, then configured endpoint order, then age.
-  ep_order <- match(out$endpoint, tolower(vapply(entry$endpoints, `[[`,
-                                                 "", "name")))
+  ep_names <- tolower(vapply(entry$endpoints, `[[`, "", "name"))
+  ep_order <- match(out$endpoint, ep_names)
   out <- out[order(as.numeric(out$conc), ep_order, as.numeric(out$age)), ,
              drop = FALSE]
   rownames(out) <- NULL

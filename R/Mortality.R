@@ -775,10 +775,17 @@ Mortality <- function(
                                     age_struc, mort_rate, mort_lvl, CRF, CI,
                                     chunk_ages = NULL, config = NULL,
                                     dgt_conc = 1) {
+  # Resolve the model and build its RR table once: every age block below runs
+  # the same lookup, so rebuilding it per block is pure repeated work.
+  crf_label <- if (is.data.frame(CRF)) {
+    "user-supplied"
+  } else {
+    .match_cr_model(CRF, config)
+  }
   RR_tbl <- if (is.data.frame(CRF)) {
     CRF
   } else {
-    RR_std(.match_cr_model(CRF, config), CI, dgt = dgt_conc, config = config)
+    RR_std(crf_label, CI, dgt = dgt_conc, config = config)
   }
   ages   <- .chunkable_ages(mort_rate, RR_tbl)
 
@@ -786,7 +793,8 @@ Mortality <- function(
     # No shared age stratum: leave the report to .calc_attributable().
     return(.calc_attributable(calc_fild, conc_real, conc_cf, pop_total,
                               age_struc, mort_rate, mort_lvl, CRF, CI,
-                              config = config, dgt_conc = dgt_conc))
+                              config = config, dgt_conc = dgt_conc,
+                              RR_tbl = RR_tbl, crf_label = crf_label))
   }
 
   size   <- .resolve_chunk_ages(chunk_ages, nrow(calc_fild), length(ages),
@@ -802,7 +810,7 @@ Mortality <- function(
       age_struc |> filter(.standardize_age_key(age) %in% block),
       mort_rate |> filter(.standardize_age_key(age) %in% block),
       mort_lvl, CRF, CI, warn = i == 1L, config = config,
-      dgt_conc = dgt_conc
+      dgt_conc = dgt_conc, RR_tbl = RR_tbl, crf_label = crf_label
     )
   })
 
@@ -838,16 +846,24 @@ Mortality <- function(
 # for the whole run.
 .calc_attributable <- function(calc_fild, conc_real, conc_cf, pop_total,
                                age_struc, mort_rate, mort_lvl, CRF, CI,
-                               warn = TRUE, config = NULL, dgt_conc = 1) {
-  crf_label <- if (is.character(CRF)) {
-    .match_cr_model(CRF, config)
-  } else {
-    "user-supplied"
+                               warn = TRUE, config = NULL, dgt_conc = 1,
+                               RR_tbl = NULL, crf_label = NULL) {
+  # RR_tbl/crf_label come precomputed from .calc_attributable_ages() so that a
+  # chunked run does not rebuild the same lookup once per age block; the
+  # defaults keep direct calls self-contained.
+  if (is.null(crf_label)) {
+    crf_label <- if (is.character(CRF)) {
+      .match_cr_model(CRF, config)
+    } else {
+      "user-supplied"
+    }
   }
-  RR_tbl <- if (is.data.frame(CRF)) {
-    CRF
-  } else {
-    RR_std(crf_label, CI, dgt = dgt_conc, config = config)
+  if (is.null(RR_tbl)) {
+    RR_tbl <- if (is.data.frame(CRF)) {
+      CRF
+    } else {
+      RR_std(crf_label, CI, dgt = dgt_conc, config = config)
+    }
   }
 
   # Out-of-range exposures simply never join the lookup key. Say how many

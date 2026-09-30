@@ -163,6 +163,85 @@ describe("cr_config() validation", {
     f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": [30, 25]}]}')
     expect_error(cr_config(f), "models.X.endpoints\\[1\\].ages")
   })
+
+  it("rejects bad sheets and duplicate aliases", {
+    f <- .cfg_with_model('{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"MEAN": 1}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    expect_error(cr_config(f), "sheets")
+
+    f <- .cfg_with_model('{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"NOPE": "S"}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    expect_error(cr_config(f), "unknown branch")
+
+    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T", "sheets": {"MEAN": "S"}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    expect_error(cr_config(f), "only used for xlsx/csv")
+
+    f <- .write_cfg(c(
+      '{"schema_version": 1, "models": {',
+      '"A": {"aliases": ["X", "x"], "lookup": {"kind": "rda", "table": "T"},',
+      '      "endpoints": [{"name": "e", "ages": [1]}]}',
+      '}}'
+    ))
+    expect_error(cr_config(f), "duplicates")
+  })
+
+  it("rejects a directory as the config path", {
+    expect_error(cr_config(tempdir()), "directory")
+  })
+})
+
+describe("lookup coverage", {
+  it("errors when a configured endpoint is absent from the lookup", {
+    f <- .write_cfg(c(
+      '{"schema_version": 1, "models": {',
+      '"BAD": {"lookup": {"kind": "rda", "table": "GEMM_Lookup_Table"},',
+      ' "endpoints": [{"name": "xyz", "ages": [25, 30]}]}',
+      '}}'
+    ))
+    expect_error(RR_std("BAD", config = f), "no columns for endpoint")
+  })
+
+  it("carries the nearest previous age forward when a later age has no column", {
+    dir <- file.path(tempdir(), "attrmort-cr-hole")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    tab <- data.frame(concentration = c("10", "20"), ihd_25 = c(1.1, 1.2))
+    readr::write_csv(tab, file.path(dir, "MEAN.csv"))
+    readr::write_csv(tab, file.path(dir, "LOW.csv"))
+    readr::write_csv(tab, file.path(dir, "UP.csv"))
+    f <- file.path(dir, "cr_config.json")
+    writeLines(c(
+      '{"schema_version": 1, "models": {',
+      '"HOLED": {"lookup": {"kind": "csv", "path": "."},',
+      ' "conc_col": "concentration",',
+      ' "endpoints": [{"name": "ihd", "ages": [25, 30]}]}',
+      '}}'
+    ), f)
+
+    # Legacy semantics, pinned by the GEMM 85/90/95 columns: age 30 inherits
+    # age 25. The lookup-coverage check only requires an anchor (first age or
+    # `_ALL`), and the NA guard catches a lookup with no anchor at all.
+    out <- RR_std("HOLED", config = f)
+    expect_equal(out$RR[out$conc == "10" & out$age == "30"], 1.1)
+    expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.2)
+  })
+
+  it("errors when the CI branches do not carry the same columns", {
+    dir <- file.path(tempdir(), "attrmort-cr-branches")
+    unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
+    readr::write_csv(data.frame(concentration = "10", ihd_25 = 1.1),
+                     file.path(dir, "MEAN.csv"))
+    readr::write_csv(data.frame(concentration = "10", ihd_30 = 1.2),
+                     file.path(dir, "LOW.csv"))
+    readr::write_csv(data.frame(concentration = "10", ihd_25 = 1.0),
+                     file.path(dir, "UP.csv"))
+    f <- file.path(dir, "cr_config.json")
+    writeLines(c(
+      '{"schema_version": 1, "models": {',
+      '"SPLIT": {"lookup": {"kind": "csv", "path": "."},',
+      ' "conc_col": "concentration",',
+      ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
+      '}}'
+    ), f)
+    expect_error(RR_std("SPLIT", config = f), "share the same columns")
+  })
 })
 
 # Custom-model end-to-end: user config + file lookup, no package data touched.
