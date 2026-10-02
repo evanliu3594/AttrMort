@@ -30,14 +30,20 @@
 .canonical_age_label <- function(x) {
   out <- x
 
-  under <- str_detect(x, .AGE_LABEL_UNDER)
-  if (any(under)) {
+  # `NA` is excluded from both the test and the assignment: `any(c(FALSE, NA))`
+  # evaluates to `NA` and `if (NA)` aborts with "missing value where TRUE/FALSE
+  # needed", while a logical subscript carrying `NA` cannot be assigned to. A
+  # missing age is not an unrecognised one, so it is passed through unchanged --
+  # exactly as it was before these labels were recognised at all -- and the
+  # downstream joins drop it. `which()` never yields `NA`.
+  under <- which(!is.na(x) & str_detect(x, .AGE_LABEL_UNDER))
+  if (length(under) > 0) {
     out[under] <- "0"
   }
 
   for (pattern in c(.AGE_LABEL_RANGE, .AGE_LABEL_OPEN)) {
-    hit <- str_detect(x, pattern)
-    if (any(hit)) {
+    hit <- which(!is.na(x) & str_detect(x, pattern))
+    if (length(hit) > 0) {
       out[hit] <- str_extract(x[hit], "^\\d+")
     }
   }

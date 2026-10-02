@@ -305,6 +305,48 @@ see `diagnosis/validate_table_contract_261002.md` from section 八 onwards.
   population and 26.4% of Romania's. The warning lists the strata, their share of
   `age_struc$prop`, and the strata the CRF does cover.
 
+### Population aggregation on real rasters (261002)
+
+Found by running a 9.33e8-cell 30 arc-sec population GeoTIFF against a 6,699-cell
+0.1 deg country window; see `diagnosis/validate_scale_perf_261002.md`.
+
+* `.aggregate_pop()` no longer reports a windowed population total as a loss, and
+  no longer reads the whole raster to serve a window. The conservation check
+  compared the source's *global* total with the sum of the output, so every
+  regional run warned: the shipped LandScan against a Lao window was reported as
+  "changed the total by 98.8630%" although the transfer is exact (0.000000%
+  against a hand-computed area-weighted reference). It now compares the source's
+  total over the footprint the output has, skips the comparison when the template
+  reaches outside the source or its edges fall between two source cells, and
+  reports one layer at a time for a multi-band source (a scalar comparison stopped
+  with "'length = 2' in coercion to 'logical(1)'"). The source is also cropped to
+  that footprint on whole aggregation blocks before it is read: aggregating the
+  globe for a Lao window went from 16.14 s to 0.16 s, with the aggregated blocks
+  and every output value unchanged
+  (`tests/testthat/test-validate-pop-conservation.R`).
+* `align_to_target()` compares CRS with `terra::same.crs()` instead of comparing
+  the CRS strings: "EPSG:4326" and "OGC:CRS84" are the same grid, but the string
+  test sent the whole raster through `terra::project()` and warned
+  "Reprojecting ..." for a warp that changes no value. A CRS that really differs
+  is still projected and still reported.
+
+### A missing age label is passed through, not fatal (261002)
+
+Found by the independent verifier's counter-example sweep
+(`diagnosis/validate_verify_261002.md`), which the four acceptance gates do not
+reach: no assertion in the suite feeds a missing age.
+
+* Age labels are normalised to the lookup's stratum keys, and that normalisation
+  aborted the whole run when an age was missing: `any(str_detect(x, pattern))`
+  evaluates to `NA` and `if (NA)` stops with "missing value where TRUE/FALSE
+  needed", a message that says nothing about ages. A table with one `NA` age --
+  reachable from `mortality()` and `decompose()` at validation time -- went from
+  "that row is dropped by the join" to "the run stops". `NA` is now excluded from
+  both the match and the assignment, so a missing age is passed through exactly as
+  it was before the labels were recognised, and the pre-existing "not a standard
+  5-year stratum" report still names it. `tests/testthat/test-validate-na-age.R`
+  pins both halves.
+
 ## New features
 
 * `mortality()` accepts a raster-only call: when `conc_real` is a raster (a
