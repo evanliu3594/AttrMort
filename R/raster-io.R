@@ -225,53 +225,234 @@ raster_to_grid <- function(path, band_names = NULL, dgt = 2) {
 # aggregate first (which conserves the sum) and only then resample onto the
 # template grid. Totals before and after are compared, and a warning is
 # issued when more than `tol` of the total is lost.
+#
+# Only the part of the source the output actually covers is read: aggregating
+# the globe to serve one country reads 9.33e8 cells for a 6699-cell window
+# (16 s measured on the shipped LandScan and 0.1 deg Lao template). The crop is
+# taken on whole aggregation blocks, so the blocks -- and therefore every
+# output value -- are the ones the uncropped path would produce.
 .aggregate_pop <- function(r, template, tol = 0.001) {
   res_r <- terra::res(r)
   res_t <- terra::res(template)
   fact  <- res_t / res_r
 
-  total_before <- terra::global(r, fun = "sum", na.rm = TRUE)[[1]]
+  # ── which alignment the source and the target are in ────────────────
+  # The three cases of the old flow, named once: an exact multiple goes
+  # through terra::aggregate(), a finer target is split between the sub-cells,
+  # and anything else can only be resampled.
+  mode <- if (all(fact >= 1 - 1e-6) && all(abs(fact - round(fact)) < 1e-6)) {
+    "aggregate"
+  } else if (all(fact < 1 - 1e-6)) {
+    "disaggregate"
+  } else {
+    "plain"
+  }
 
-  if (all(fact >= 1 - 1e-6) && all(abs(fact - round(fact)) < 1e-6)) {
+  # The block size the crop has to respect: the aggregation block where there
+  # is one, a whole source cell otherwise. Both `terra::aggregate()` and
+  # `terra::disagg()` start from the raster origin, so a window that is a whole
+  # number of blocks away from it leaves the alignment untouched.
+  step <- if (identical(mode, "aggregate")) res_r * round(fact) else res_r
+
+  # ── the part of the source the output covers ────────────────────────
+  # NULL when the template reaches outside the source, in which case nothing is
+  # cropped and there is no like-for-like total to compare against.
+  win   <- .pop_window(r, template, step)
+  r_src <- .pop_crop(r, win, template)
+
+  # ── the total the output has to preserve ────────────────────────────
+  # It is the source's total over the footprint the output *has*, not over the
+  # (deliberately larger) window that was read and certainly not the source
+  # overall: a windowed output can never hold the globe, so comparing the two
+  # reports the window as a loss (the shipped LandScan summed to 7,981,969,726
+  # globally against 90,758,858 for a Lao window, reported as "changed the
+  # total by 98.8630%" although the transfer was exact to 0.000000% against a
+  # hand-computed area-weighted reference). `NULL` means the footprint cannot be
+  # isolated -- the template reaches outside the source, or its edges do not sit
+  # on the source lattice -- and two different footprints are not comparable.
+  total_before <- .pop_footprint(r, template)
+  total_before <- if (is.null(total_before)) {
+    NULL
+  } else {
+    terra::global(total_before, fun = "sum", na.rm = TRUE)[[1]]
+  }
+
+  out <- if (identical(mode, "aggregate")) {
     # terra::aggregate() takes the factor as (rows, columns); `fact` is
     # (x, y), so the two axes are reversed here. They may need different
     # factors on a non-square target grid. A factor of one means nothing to
     # aggregate, and terra would warn about the no-op.
     agg <- if (any(round(fact) > 1L)) {
-      terra::aggregate(r, fact = rev(round(fact)), fun = "sum", na.rm = TRUE)
+      terra::aggregate(r_src, fact = rev(round(fact)), fun = "sum", na.rm = TRUE)
     } else {
-      r
+      r_src
     }
-    out <- terra::resample(agg, template, method = "sum")
-  } else if (all(fact < 1 - 1e-6)) {
+    terra::resample(agg, template, method = "sum")
+  } else if (identical(mode, "disaggregate")) {
     # Target is finer: a population count has to be *divided* between the finer
     # cells, not interpolated. Bilinear hands every sub-cell the source value,
     # which multiplies the total by the subdivision factor (2x2 deg holding 100
     # people becomes four 1x1 deg cells holding 100 each).
     n    <- ceiling(1 / fact)
-    fine <- terra::disagg(r, fact = rev(n), method = "near") / prod(n)
-    out  <- terra::resample(fine, template, method = "sum")
+    fine <- terra::disagg(r_src, fact = rev(n), method = "near") / prod(n)
+    terra::resample(fine, template, method = "sum")
   } else {
     cli::cli_warn(str_c(
       "Population raster resolution ({paste(round(res_r, 6), collapse = \" x \")}) is not ",
       "an exact multiple of the target ({paste(round(res_t, 6), collapse = \" x \")}); ",
       "falling back to plain resampling, which may not preserve totals."
     ))
-    out <- terra::resample(r, template, method = "sum")
+    terra::resample(r_src, template, method = "sum")
   }
 
+  # One number per layer: a multi-band source reports the layer that moved most,
+  # where a scalar comparison would have stopped with "length = 2" in coercion.
   total_after <- terra::global(out, fun = "sum", na.rm = TRUE)[[1]]
-  if (is.finite(total_before) && is.finite(total_after) && total_before != 0) {
-    lost <- abs(total_after - total_before) / abs(total_before)
-    if (lost > tol) {
-      cli::cli_warn(str_c(
-        "Aggregating the population raster changed the total by ",
-        "{sprintf(\"%.4f%%\", 100 * lost)} ({format(total_before, big.mark = \",\")} -> ",
-        "{format(total_after, big.mark = \",\")})."
-      ))
+  if (!is.null(total_before) && length(total_before) == length(total_after)) {
+    usable <- is.finite(total_before) & is.finite(total_after) & total_before != 0
+    if (any(usable)) {
+      lost <- abs(total_after[usable] - total_before[usable]) /
+        abs(total_before[usable])
+      if (max(lost) > tol) {
+        idx    <- which(usable)[which.max(lost)]
+        layer  <- if (length(total_before) > 1L) sprintf(" (layer %d)", idx) else ""
+        cli::cli_warn(str_c(
+          "Aggregating the population raster changed the total by ",
+          "{sprintf(\"%.4f%%\", 100 * max(lost))}{layer} ",
+          "({format(total_before[idx], big.mark = \",\")} -> ",
+          "{format(total_after[idx], big.mark = \",\")})."
+        ))
+      }
     }
   }
   out
+}
+
+# The source restricted to the footprint the output covers: the cells the
+# template's own edges fall on, kept only when those edges *are* cell
+# boundaries. When an edge falls between two cells the footprint cannot be
+# isolated, and comparing the source's total against the output's would be the
+# old mistake in miniature -- two different areas. The tolerance is a thousandth
+# of a source cell, which is where the float round-trips through terra live, not
+# where a real offset lives.
+#
+# Like `.pop_crop()` the extent is shrunk by a thousandth of a cell before the
+# snap, for the same reason: `terra::crop()` expands to the next cell boundary,
+# and without the shrink a template a billionth of a degree off the lattice
+# would come back one whole cell wider and no longer be the footprint it claims
+# to be.
+#
+# Returns NULL when the template reaches outside the source, or when one of its
+# edges falls between two source cells.
+.pop_footprint <- function(r, template, tol_cell = 1e-3) {
+  res_r <- terra::res(r)
+  e_r   <- as.vector(terra::ext(r))
+  e_t   <- as.vector(terra::ext(template))
+
+  tol <- tol_cell * res_r
+  covered <- e_t[1] >= e_r[1] - tol[1] && e_t[2] <= e_r[2] + tol[1] &&
+    e_t[3] >= e_r[3] - tol[2] && e_t[4] <= e_r[4] + tol[2]
+  if (!covered) {
+    return(NULL)
+  }
+
+  pad <- res_r / 1000
+  cut <- terra::crop(r,
+                     terra::ext(e_t[1] + pad[1], e_t[2] - pad[1],
+                                e_t[3] + pad[2], e_t[4] - pad[2]),
+                     snap = "out")
+  e_c <- as.vector(terra::ext(cut))
+  if (any(abs(e_c - e_t) > tol[c(1, 1, 2, 2)])) {
+    return(NULL)
+  }
+  cut
+}
+
+# The window of `r` that covers `template`, rounded outwards to whole `step`
+# blocks. `step` is the block size in degrees (`c(res_x, res_y)`), so the window
+# starts and ends on the lattice the aggregation and the disaggregation are
+# aligned to.
+#
+# Rounding is outwards, never inwards: the window has to contain the template,
+# because `terra::resample()` reads every source cell that overlaps a target
+# cell and a missing sliver at the edge would change the edge values. A window
+# one block larger than needed costs a little reading and changes nothing.
+#
+# The window is a range of *cell indices*, never a pair of coordinates.
+# `res()` is routinely a hair off the nominal cell size -- the shipped LandScan
+# reports 0.0083333333329999992 -- and `terra::crop()` snaps an extent outwards
+# to the next cell boundary, so a window computed in degrees lands a billionth
+# of a degree below a boundary, comes back one whole cell wider, and moves every
+# aggregation block with it. Measured on the Lao window: 88 of 6699 cells
+# differed from the uncropped path that way. `r[rows, cols]` has no such
+# round-trip: the subset keeps the source's own lattice.
+#
+# Returns NULL when the template reaches outside the source: then there is no
+# window that both covers the template and stays inside the source, and the
+# caller has to keep reading the whole raster.
+.pop_window <- function(r, template, step) {
+  res_r <- terra::res(r)
+  e_r   <- as.vector(terra::ext(r))
+  e_t   <- as.vector(terra::ext(template))
+
+  # `ext()` returns (xmin, xmax, ymin, ymax); the tolerance absorbs the
+  # round-trip through terra's cell-centre arithmetic.
+  tol <- 1e-3 * res_r
+  covered <- e_t[1] >= e_r[1] - tol[1] && e_t[2] <= e_r[2] + tol[1] &&
+    e_t[3] >= e_r[3] - tol[2] && e_t[4] <= e_r[4] + tol[2]
+  if (!covered) {
+    return(NULL)
+  }
+
+  # whole source cells per block; a block size below one cell is one cell
+  block <- pmax(1, round(step / res_r))
+
+  # The enclosing block, in cell indices. Rows are numbered from the top, so the
+  # y side counts down from ymax; the boundaries themselves are degrees, and
+  # `.pop_crop()` is what keeps them on terra's lattice.
+  col0 <- max(1L, floor((e_t[1] - e_r[1]) / (res_r[1] * block[1])) * block[1] + 1)
+  col1 <- min(terra::ncol(r),
+              ceiling((e_t[2] - e_r[1]) / (res_r[1] * block[1])) * block[1])
+  row0 <- max(1L, floor((e_r[4] - e_t[4]) / (res_r[2] * block[2])) * block[2] + 1)
+  row1 <- min(terra::nrow(r),
+              ceiling((e_r[4] - e_t[3]) / (res_r[2] * block[2])) * block[2])
+
+  lower <- e_r[1] + (col0 - 1) * res_r[1]
+  upper <- e_r[1] + col1 * res_r[1]
+  right <- e_r[4] - (row0 - 1) * res_r[2]
+  left  <- e_r[4] - row1 * res_r[2]
+  terra::ext(lower, upper, left, right)
+}
+
+# The window as a raster.
+#
+# `terra::crop()` snaps an extent outwards to the next cell boundary, and a
+# window's coordinates are only ever as exact as the degree arithmetic that
+# produced them (the shipped LandScan reports `res()` as 0.0083333333329999992).
+# A window that is nominally block-aligned therefore comes back one whole cell
+# wider -- with every aggregation block moved along with it, which changes values
+# in the last digits (measured on the Lao window: 88 of 6699 cells differed from
+# the uncropped path). Shrinking the request by a thousandth of a cell makes the
+# snap land on the boundary the window meant rather than on the one next to it.
+#
+# The result is checked against the template: if the shrink ever cut into it, the
+# caller reads the whole raster rather than a window that is too small.
+.pop_crop <- function(r, window, template) {
+  if (is.null(window)) {
+    return(r)
+  }
+  pad <- terra::res(r) / 1000
+  cut <- terra::crop(r,
+                     terra::ext(window[1] + pad[1], window[2] - pad[1],
+                                window[3] + pad[2], window[4] - pad[2]),
+                     snap = "out")
+
+  e_c <- as.vector(terra::ext(cut))
+  e_t <- as.vector(terra::ext(template))
+  if (e_c[1] > e_t[1] || e_c[2] < e_t[2] || e_c[3] > e_t[3] || e_c[4] < e_t[4]) {
+    return(r)
+  }
+  cut
 }
 
 #' Align multiple rasters to a common target grid
@@ -335,8 +516,13 @@ align_to_target <- function(raster_list,
   aligned <- map(names(raster_list), function(nm) {
     r <- raster_list[[nm]]
 
-    # reproject to WGS84 if needed
-    if (!is.na(terra::crs(r)) && terra::crs(r) != terra::crs(template)) {
+    # reproject to WGS84 if needed. The comparison is left to terra: the CRS
+    # strings of "EPSG:4326" and "OGC:CRS84" differ while the grids are the
+    # same, and a string comparison projected the whole raster for nothing
+    # (measured: bit-identical values, one "Reprojecting ..." warning, and the
+    # warp's cost). A CRS that really does need the warp still gets it, and
+    # still gets the warning.
+    if (!is.na(terra::crs(r)) && !terra::same.crs(r, template)) {
       cli::cli_warn("Reprojecting '{nm}' to EPSG:4326.")
       r <- terra::project(r, template)
     } else if (is.na(terra::crs(r))) {
