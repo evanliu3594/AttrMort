@@ -417,6 +417,14 @@ table) to `mortality()`; see `diagnosis/validate_table_contract_261002.md`.
   `.RES_FALLBACK`, `.RES_SUGGESTIONS`) instead of literals in the flow.
 * `.permutations()` preallocates its result, and `globalVariables()` no longer
   lists `mort_0` ... `mort_4`: the decomposition reads its step columns by name.
+* `tests/testthat/test-validate-numeric.R` pins the *numbers* rather than the
+  behaviour: an independent base-R reconstruction of the PWRR branch (hand
+  written `merge()` joins, the formula from `AGENTS.md` section 4 written out)
+  is compared cell for cell against a run on the shipped example grid, for both
+  the calibrated and the counterfactual-exposure paths; a closed-form two-cell
+  anchor states that the baseline burden is `pop * prop * mortrate / 1e5` and
+  that `PWRR` is the population-weighted mean of `RR`, and that `aggregate =`
+  sums the grid cells column for column.
 
 # AttrMort 0.2.0
 
