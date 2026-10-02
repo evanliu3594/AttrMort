@@ -15,33 +15,33 @@
 # Canonicalise a user-supplied CI / index label.
 .match_ci <- function(index) {
   if (!is.character(index) || length(index) != 1) {
-    stop("`CI` must be a single character string.", call. = FALSE)
+    .abort("`ci` must be a single character string.")
   }
   key <- toupper(trimws(index))
   key <- switch(key, UPPER = "UP", LOWER = "LOW", key)
   if (!key %in% c("MEAN", "UP", "LOW")) {
-    stop(
-      "`CI` must be one of \"MEAN\", \"UP\" or \"LOW\" ",
-      "(aliases \"UPPER\"/\"LOWER\" are accepted). Got: \"", index, "\".",
-      call. = FALSE
+    .abort(
+      str_c(
+        "`ci` must be one of \"MEAN\", \"UP\" or \"LOW\" (aliases \"UPPER\"/\"LOWER\" are ",
+        "accepted). Got: \"{index}\"."
+      )
     )
   }
   key
 }
 
 # Canonicalise a user-supplied CR model name against a config.
-.match_cr_model <- function(CR_Model, config) {
-  if (!is.character(CR_Model) || length(CR_Model) != 1) {
-    stop("`CRF` must be a single character string or a data.frame.",
-         call. = FALSE)
+.match_cr_model <- function(cr_model, config) {
+  if (!is.character(cr_model) || length(cr_model) != 1) {
+    .abort("`crf` must be a single character string or a data.frame.")
   }
-  .cr_model_entry(config, CR_Model)$name
+  .cr_model_entry(config, cr_model)$name
 }
 
 # Resolve a lookup path relative to the config file (never the cwd).
 # Accepts POSIX-absolute, drive-letter-absolute and UNC paths.
 .cr_lookup_path <- function(path, config) {
-  if (grepl("^(/|[A-Za-z]:[\\\\/]|\\\\\\\\|//)", path)) {
+  if (str_detect(path, "^(/|[A-Za-z]:[\\\\/]|\\\\\\\\|//)")) {
     return(path)
   }
   file.path(dirname(config$path), path)
@@ -51,45 +51,46 @@
 # concentration column renamed to the canonical `conc`.
 .cr_lookup_check <- function(tab, entry, source) {
   if (!is.list(tab) || !all(c("MEAN", "LOW", "UP") %in% names(tab))) {
-    stop(
-      "Lookup ", source, " must be a list with elements MEAN, LOW and UP.",
-      call. = FALSE
+    .abort(
+      "Lookup {source} must be a list with elements MEAN, LOW and UP."
     )
   }
 
   value_cols <- NULL
   for (branch in c("MEAN", "LOW", "UP")) {
-    df <- tab[[branch]]
-    if (!is.data.frame(df)) {
-      stop("Lookup ", source, " branch ", branch, " is not a data.frame.",
-           call. = FALSE)
+    branch_tbl <- tab[[branch]]
+    if (!is.data.frame(branch_tbl)) {
+      .abort("Lookup {source} branch {branch} is not a data.frame.")
     }
-    if (!entry$conc_col %in% names(df)) {
-      stop(
-        "Lookup ", source, " branch ", branch, " has no concentration ",
-        "column \"", entry$conc_col, "\" (columns: ",
-        paste(names(df), collapse = ", "), ").",
-        call. = FALSE
+    if (!entry$conc_col %in% names(branch_tbl)) {
+      .abort(
+        str_c(
+          "Lookup {source} branch {branch} has no concentration column \"{entry$conc_col}\" ",
+          "(columns: {paste(names(branch_tbl), collapse = \", \")})."
+        )
       )
     }
-    names(df)[names(df) == entry$conc_col] <- "conc"
-    if (anyNA(suppressWarnings(as.numeric(df$conc)))) {
-      stop("Lookup ", source, " branch ", branch,
-           " has a non-numeric concentration column.", call. = FALSE)
+    branch_tbl <- rename(branch_tbl, conc = all_of(entry$conc_col))
+    if (anyNA(suppressWarnings(as.numeric(branch_tbl$conc)))) {
+      .abort(str_c(
+        "Lookup {source} branch {branch} has a non-numeric concentration column."
+      ))
     }
-    cols <- setdiff(names(df), "conc")
+    cols <- setdiff(names(branch_tbl), "conc")
     if (length(cols) == 0) {
-      stop("Lookup ", source, " branch ", branch,
-           " has no endpoint-age columns.", call. = FALSE)
+      .abort(str_c(
+        "Lookup {source} branch {branch} has no endpoint-age columns."
+      ))
     }
     if (is.null(value_cols)) {
       value_cols <- cols
     } else if (!identical(sort(value_cols), sort(cols))) {
-      stop("Lookup ", source, " branches do not share the same columns; ",
-           "MEAN has ", length(value_cols), " and ", branch, " has ",
-           length(cols), ".", call. = FALSE)
+      .abort(str_c(
+        "Lookup {source} branches do not share the same columns; MEAN has {length(value_cols)} ",
+        "and {branch} has {length(cols)}."
+      ))
     }
-    tab[[branch]] <- df
+    tab[[branch]] <- branch_tbl
   }
 
   # Every configured endpoint must be anchored: its first configured age needs
@@ -103,12 +104,12 @@
     has_all <- paste0(prefix, "_all") %in% cols_low
     first   <- paste0(prefix, "_", ep$ages[1]) %in% cols_low
     if (!has_all && !first) {
-      stop(
-        "Lookup ", source, " has no columns for endpoint \"", prefix,
-        "\" of model \"", entry$name, "\" (needs \"", prefix, "_",
-        ep$ages[1], "\" or \"", prefix, "_ALL\"). Available columns: ",
-        paste(value_cols, collapse = ", "), ".",
-        call. = FALSE
+      .abort(
+        str_c(
+          "Lookup {source} has no columns for endpoint \"{prefix}\" of model \"{entry$name}\" ",
+          "(needs \"{prefix}_{ep$ages[1]}\" or \"{prefix}_ALL\"). Available columns: ",
+          "{paste(value_cols, collapse = \", \")}."
+        )
       )
     }
   }
@@ -125,7 +126,7 @@
       error = function(e) NULL
     )
     if (is.null(tab)) {
-      stop("Lookup table not found in AttrMort: ", lk$table, ".", call. = FALSE)
+      .abort("Lookup table not found in AttrMort: {lk$table}.")
     }
     return(.cr_lookup_check(tab, entry, lk$table))
   }
@@ -134,26 +135,30 @@
 
   if (identical(lk$kind, "xlsx")) {
     if (!file.exists(path)) {
-      stop("Lookup file not found: ", path, call. = FALSE)
+      .abort("Lookup file not found: {path}")
     }
     if (!requireNamespace("readxl", quietly = TRUE)) {
-      stop("Reading xlsx lookup tables needs the `readxl` package. ",
-           "Install it, or use an `rda`/`csv` lookup.", call. = FALSE)
+      .abort(str_c(
+        "Reading xlsx lookup tables needs the `readxl` package. Install it, or use an `rda`/`csv` ",
+        "lookup."
+      ))
     }
     read_branch <- function(branch) {
       sheet <- if (!is.null(lk$sheets[[branch]])) lk$sheets[[branch]] else branch
       tryCatch(
         as.data.frame(readxl::read_excel(path, sheet = sheet)),
         error = function(e) {
-          stop("Cannot read sheet \"", sheet, "\" (branch ", branch,
-               ") from ", path, ": ", conditionMessage(e), call. = FALSE)
+          .abort(str_c(
+            "Cannot read sheet \"{sheet}\" (branch {branch}) from {path}: {conditionMessage(e)}"
+          ))
         }
       )
     }
   } else {
     if (!dir.exists(path)) {
-      stop("CSV lookup path must be a directory of MEAN.csv/LOW.csv/UP.csv: ",
-           path, " not found.", call. = FALSE)
+      .abort(str_c(
+        "CSV lookup path must be a directory of MEAN.csv/LOW.csv/UP.csv: {path} not found."
+      ))
     }
     read_branch <- function(branch) {
       file <- if (!is.null(lk$sheets[[branch]])) {
@@ -163,14 +168,14 @@
       }
       file <- file.path(path, file)
       if (!file.exists(file)) {
-        stop("Lookup csv not found: ", file, call. = FALSE)
+        .abort("Lookup csv not found: {file}")
       }
       as.data.frame(readr::read_csv(file, show_col_types = FALSE))
     }
   }
 
-  tab <- stats::setNames(
-    lapply(c("MEAN", "LOW", "UP"), read_branch),
+  tab <- set_names(
+    map(c("MEAN", "LOW", "UP"), read_branch),
     c("MEAN", "LOW", "UP")
   )
   .cr_lookup_check(tab, entry, path)
@@ -187,13 +192,13 @@
 #' keys (`matchable()` precision `dgt`) so that it can be joined against
 #' exposure data regardless of how that data is stored.
 #'
-#' @param CR_Model Character. CR model name; see [cr_models()] for the
+#' @param cr_model Character. CR model name; see [cr_models()] for the
 #'   accepted values. Matched case-insensitively, aliases included.
-#' @param index Character. Which table to use: `"MEAN"` (default), `"UP"` or
+#' @param ci Character. Which table to use: `"MEAN"` (default), `"UP"` or
 #'   `"LOW"`. `"UPPER"` and `"LOWER"` are accepted as aliases.
 #' @param dgt Integer. Decimal places used to render the concentration keys.
 #'   Must match the precision used for the exposure side (`dgt_conc` in
-#'   [Mortality()]). Default 1.
+#'   [mortality()]). Default 1.
 #' @param config Optional configuration from [cr_config()], or a path to a
 #'   JSON config. `NULL` (default) uses the shipped config.
 #'
@@ -202,14 +207,14 @@
 #' @export
 #'
 #' @examples
-#' head(RR_std("GEMM", "MEAN"))
-#' unique(RR_std("O3", "MEAN")$endpoint)
-RR_std <- function(CR_Model, index = "MEAN", dgt = 1, config = NULL) {
-  index  <- .match_ci(index)
+#' head(rr_std("GEMM", "MEAN"))
+#' unique(rr_std("O3", "MEAN")$endpoint)
+rr_std <- function(cr_model, ci = "MEAN", dgt = 1, config = NULL) {
+  ci  <- .match_ci(ci)
   config <- .as_cr_config(config)
-  entry  <- .cr_model_entry(config, CR_Model)
-  RR     <- .cr_lookup_load(entry, config)
-  wide   <- RR[[index]]
+  entry  <- .cr_model_entry(config, cr_model)
+  rr_wide <- .cr_lookup_load(entry, config)
+  wide    <- rr_wide[[ci]]
 
   long <- wide |>
     pivot_longer(
@@ -225,7 +230,7 @@ RR_std <- function(CR_Model, index = "MEAN", dgt = 1, config = NULL) {
   # Ages without their own column inherit the nearest previous age (the `_ALL`
   # column when that is the only one): this is the shipped tables' semantics
   # (e.g. GEMM 85/90/95 use age 80's RR), pinned by the fingerprints.
-  grid <- lapply(entry$endpoints, function(ep) {
+  grid <- map(entry$endpoints, function(ep) {
     expand_grid(
       conc     = wide$conc,
       endpoint = ep$name,
@@ -253,16 +258,17 @@ RR_std <- function(CR_Model, index = "MEAN", dgt = 1, config = NULL) {
   # that slips through (e.g. a missing `_ALL` column).
   if (anyNA(out$RR)) {
     hole <- out[which(is.na(out$RR))[1], ]
-    stop(
-      "Model \"", entry$name, "\": the lookup has no RR value for endpoint \"",
-      hole$endpoint, "\" at age ", hole$age, ". Add that age's column or an \"",
-      toupper(hole$endpoint), "_ALL\" column to the lookup.",
-      call. = FALSE
+    .abort(
+      str_c(
+        "Model \"{entry$name}\": the lookup has no RR value for endpoint \"{hole$endpoint}\" at ",
+        "age {hole$age}. Add that age's column or an \"{toupper(hole$endpoint)}_ALL\" column to ",
+        "the lookup."
+      )
     )
   }
 
   # Stable order: concentration, then configured endpoint order, then age.
-  ep_names <- tolower(vapply(entry$endpoints, `[[`, "", "name"))
+  ep_names <- tolower(map_chr(entry$endpoints, "name"))
   ep_order <- match(out$endpoint, ep_names)
   out <- out[order(as.numeric(out$conc), ep_order, as.numeric(out$age)), ,
              drop = FALSE]

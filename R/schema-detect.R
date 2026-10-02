@@ -1,6 +1,6 @@
 # ── Column-name detection and input validation ──────────────────────────
 #
-# Both functions are internal: Mortality() calls them on every invocation, so
+# Both functions are internal: mortality() calls them on every invocation, so
 # their output has to be quiet when the data is fine and specific when it is
 # not.
 
@@ -38,14 +38,14 @@
 # Map arbitrary column names onto the canonical schema.
 #
 # Returns c(semantic = "<actual column>"); `quiet = TRUE` suppresses both the
-# per-field warnings and the mapping report, which is what Mortality() wants
+# per-field warnings and the mapping report, which is what mortality() wants
 # when a missing field is not an error.
-detect_columns <- function(df,
+detect_columns <- function(data,
                            schema = c("age", "cause", "mortrate", "prop",
                                       "location"),
                            quiet = FALSE) {
-  stopifnot(is.data.frame(df))
-  col_names <- names(df)
+  stopifnot(is.data.frame(data))
+  col_names <- names(data)
   col_lower <- tolower(col_names)
 
   result <- character(0)
@@ -53,13 +53,15 @@ detect_columns <- function(df,
 
   for (semantic in schema) {
     variants <- .COLUMN_VARIANTS[[semantic]]
-    if (is.null(variants)) next
+    if (is.null(variants)) {
+      next
+    }
 
     found <- NULL
 
-    # exact (case-insensitive) match first
+    # exact match on the normalised name first (`Mort Rate` finds mortrate)
     for (v in variants) {
-      idx <- which(col_lower == tolower(v))
+      idx <- which(col_lower == tolower(v) | .norm_name(col_names) == .norm_name(v))
       if (length(idx) == 1 && !col_names[idx] %in% used) {
         found <- col_names[idx]
         break
@@ -69,7 +71,7 @@ detect_columns <- function(df,
     # then a substring match
     if (is.null(found)) {
       for (v in variants) {
-        idx <- which(grepl(tolower(v), col_lower, fixed = TRUE))
+        idx <- which(str_detect(col_lower, fixed(tolower(v))))
         idx <- setdiff(idx, which(col_names %in% used))
         if (length(idx) >= 1) {
           found <- col_names[idx[1]]
@@ -82,14 +84,15 @@ detect_columns <- function(df,
       result[semantic] <- found
       used <- c(used, found)
     } else if (!quiet) {
-      warning("detect_columns: no column found for '", semantic, "'",
-              call. = FALSE)
+      cli::cli_warn("detect_columns: no column found for '{semantic}'")
     }
   }
 
   if (!quiet && length(result) > 0) {
-    message("Column mapping detected: ",
-            paste(sprintf("%s -> %s", names(result), result), collapse = ", "))
+    cli::cli_inform(str_c(
+      "Column mapping detected: ",
+      "{paste(sprintf(\"%s -> %s\", names(result), result), collapse = \", \")}"
+    ))
   }
 
   result
@@ -97,7 +100,7 @@ detect_columns <- function(df,
 
 # Validate the prepared inputs. Returns a report instead of throwing, so the
 # caller decides whether a problem is fatal (`validate = "stop"` in
-# Mortality()).
+# mortality()).
 #
 # `blocking` collects the problems that must abort the calculation (missing
 # data, impossible values, a CRF whose endpoints are absent); `issues`
@@ -108,18 +111,19 @@ validate_mortality_input <- function(data_list,
                                      max_rate      = 5e4,
                                      dgt_conc      = 1,
                                      config        = NULL) {
-  issues   <- character(0)
-  blocking <- character(0)
+  state <- new.env(parent = emptyenv())
+  state$issues   <- character(0)
+  state$blocking <- character(0)
 
   warnf <- function(fmt, ...) {
     msg <- sprintf(fmt, ...)
-    issues <<- c(issues, msg)
-    warning(msg, call. = FALSE)
+    state$issues <- c(state$issues, msg)
+    cli::cli_warn("{msg}")
   }
   blockf <- function(fmt, ...) {
     msg <- sprintf(fmt, ...)
-    issues   <<- c(issues, msg)
-    blocking <<- c(blocking, msg)
+    state$issues   <- c(state$issues, msg)
+    state$blocking <- c(state$blocking, msg)
   }
 
   # ── data presence ──────────────────────────────────────────────────
@@ -142,7 +146,7 @@ validate_mortality_input <- function(data_list,
 
     rate_col <- intersect(c("mortrate", "mort_rate"), mort_cols)
     if (length(rate_col) == 0) {
-      nums <- names(mort)[vapply(mort, is.numeric, logical(1))]
+      nums <- names(mort)[map_lgl(mort, is.numeric)]
       rate_col <- setdiff(nums, "age")
     }
     if (length(rate_col) > 0) {
@@ -168,7 +172,7 @@ validate_mortality_input <- function(data_list,
       )
       if (!is.null(entry)) {
         actual   <- unique(tolower(as.character(mort[[cause_col[1]]])))
-        expected_ep <- vapply(entry$endpoints, `[[`, "", "name")
+        expected_ep <- map_chr(entry$endpoints, "name")
         absent <- setdiff(expected_ep, actual)
         extra  <- setdiff(actual, expected_ep)
 
@@ -180,9 +184,12 @@ validate_mortality_input <- function(data_list,
                 cr_model, paste(absent, collapse = ", "))
         }
         if (length(extra) > 0) {
-          message("mort_rate: ", length(extra), " endpoint(s) are not used by ",
-                  cr_model, " (", paste(extra, collapse = ", "),
-                  "); they will not contribute to the result.")
+          cli::cli_inform(
+            str_c(
+              "mort_rate: {length(extra)} endpoint(s) are not used by {cr_model} ",
+              "({paste(extra, collapse = \", \")}); they will not contribute to the result."
+            )
+          )
         }
       }
     }
@@ -225,7 +232,7 @@ validate_mortality_input <- function(data_list,
   if (!is.null(conc_df)) {
     conc_col <- intersect(c("conc", "concentration"), names(conc_df))
     if (length(conc_col) == 0) {
-      nums <- names(conc_df)[vapply(conc_df, is.numeric, logical(1))]
+      nums <- names(conc_df)[map_lgl(conc_df, is.numeric)]
       conc_col <- setdiff(nums, c("x", "y", "lon", "lat"))
     }
     if (length(conc_col) > 0) {
@@ -241,7 +248,9 @@ validate_mortality_input <- function(data_list,
       # `dgt_conc`. Anything else (e.g. "35.20") simply never joins, and the
       # symptom is an empty join several steps later -- say it here instead.
       raw <- conc_df[[conc_col[1]]]
-      if (is.factor(raw)) raw <- as.character(raw)
+      if (is.factor(raw)) {
+        raw <- as.character(raw)
+      }
       if (is.character(raw)) {
         canon <- matchable(conc_vals, dgt = dgt_conc)
         bad   <- !is.na(conc_vals) & raw != canon
@@ -271,5 +280,6 @@ validate_mortality_input <- function(data_list,
     }
   }
 
-  list(valid = length(blocking) == 0, issues = issues, blocking = blocking)
+  list(valid = length(state$blocking) == 0, issues = state$issues,
+       blocking = state$blocking)
 }

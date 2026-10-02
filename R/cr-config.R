@@ -1,3 +1,7 @@
+# An age list nobody would write on purpose: a guard against a configuration
+# that expands into a huge sequence (the file may come from somewhere else).
+.MAX_CR_AGES <- 100
+
 # ── C-R model configuration ─────────────────────────────────────────────
 #
 # The metadata of every concentration-response model -- which lookup table,
@@ -17,7 +21,7 @@
 }
 
 .cr_field_error <- function(field, msg) {
-  stop("CR config `", field, "`: ", msg, call. = FALSE)
+  .abort("CR config `{field}`: {msg}")
 }
 
 .cr_or <- function(x, y) if (is.null(x)) y else x
@@ -30,11 +34,10 @@
   if (is.null(config) || is.character(config)) {
     return(cr_config(config))
   }
-  stop(
+  .abort(str_c(
     "`config` must be NULL, a path to a JSON config, or a `cr_config()` object. ",
-    "Got: ", paste(class(config), collapse = "/"), ".",
-    call. = FALSE
-  )
+    "Got: {paste(class(config), collapse = \"/\")}."
+  ))
 }
 
 # `ages` accepts a range object ({from,to,by}) or an explicit vector; both are
@@ -56,6 +59,17 @@
     }
     if ((to - from) %% by > 1e-8) {
       .cr_field_error(field, "age range is not an exact multiple of `by`")
+    }
+    # The range comes from a file the caller may not have written: check how
+    # many ages it asks for before allocating them.
+    n_ages <- (to - from) / by + 1
+    if (n_ages > .MAX_CR_AGES) {
+      .abort(str_c(
+        "Age range in the CR configuration looks wrong: `from = ", from,
+        "`, `to = ", to, "`, `by = ", by, "` asks for ", n_ages,
+        " age groups, more than the ", .MAX_CR_AGES, " allowed. ",
+        "Check the `ages` field of the model."
+      ))
     }
     return(as.character(seq(from, to, by)))
   }
@@ -261,7 +275,7 @@
 #'   `schema_version`, the normalised `models`, and the resolved config
 #'   `path`.
 #'
-#' @seealso [cr_models()], [RR_std()]
+#' @seealso [cr_models()], [rr_std()]
 #'
 #' @export
 #'
@@ -273,25 +287,24 @@ cr_config <- function(path = NULL) {
   if (is.null(path)) {
     path <- .cr_default_path()
     if (!nzchar(path)) {
-      stop("The shipped `cr_models.json` could not be found.", call. = FALSE)
+      .abort("The shipped `cr_models.json` could not be found.")
     }
   } else {
     if (!is.character(path) || length(path) != 1 || is.na(path)) {
-      stop("`path` must be NULL or a single file path.", call. = FALSE)
+      .abort("`path` must be NULL or a single file path.")
     }
     if (!file.exists(path)) {
-      stop("CR config not found: ", path, call. = FALSE)
+      .abort("CR config not found: {path}")
     }
     if (dir.exists(path)) {
-      stop("CR config path is a directory, not a file: ", path, call. = FALSE)
+      .abort("CR config path is a directory, not a file: {path}")
     }
   }
 
   raw <- tryCatch(
     jsonlite::fromJSON(path, simplifyVector = FALSE),
     error = function(e) {
-      stop("Cannot parse CR config ", path, ": ", conditionMessage(e),
-           call. = FALSE)
+      .abort("Cannot parse CR config {path}: {conditionMessage(e)}")
     }
   )
   models <- .cr_normalise(raw)
@@ -303,22 +316,21 @@ cr_config <- function(path = NULL) {
 }
 
 # Resolve a CRF name (or alias, case-insensitively) to its config entry.
-.cr_model_entry <- function(config, CRF) {
-  if (!is.character(CRF) || length(CRF) != 1 || is.na(CRF)) {
-    stop("`CRF` must be a single character string.", call. = FALSE)
+.cr_model_entry <- function(config, crf) {
+  if (!is.character(crf) || length(crf) != 1 || is.na(crf)) {
+    .abort("`crf` must be a single character string.")
   }
-  key <- toupper(trimws(CRF))
+  key <- toupper(trimws(crf))
   for (nm in names(config$models)) {
     entry <- config$models[[nm]]
     if (key == toupper(nm) || key %in% toupper(entry$aliases)) {
       return(entry)
     }
   }
-  stop(
-    "Unknown CR model \"", CRF, "\". Valid models: ",
-    paste(cr_models(config), collapse = ", "), ".",
-    call. = FALSE
-  )
+  .abort(str_c(
+    "Unknown CR model \"{crf}\". Valid models: ",
+    "{paste(cr_models(config), collapse = \", \")}."
+  ))
 }
 
 #' Valid CR model names
@@ -326,7 +338,7 @@ cr_config <- function(path = NULL) {
 #' @param config Optional configuration object from [cr_config()], or a path
 #'   to a config file. `NULL` (default) uses the shipped config.
 #'
-#' @return Character vector of accepted `CRF`/`CR_Model` values, including
+#' @return Character vector of accepted `crf`/`cr_model` values, including
 #'   aliases.
 #'
 #' @export
@@ -348,4 +360,15 @@ print.attr_cr_config <- function(x, ...) {
       "\n", sep = "")
   cat("config: ", x$path, "\n", sep = "")
   invisible(x)
+#' Print a concentration-response model configuration
+#'
+#' Shows the schema version, the number of models and where the configuration
+#' was read from.
+#'
+#' @param x An `attr_cr_config` object, as returned by [cr_config()].
+#' @param ... Ignored, for compatibility with the `print()` generic.
+#'
+#' @return `x`, invisibly.
 }
+#' @examples
+#' print(cr_config())

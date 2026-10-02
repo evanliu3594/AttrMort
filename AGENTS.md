@@ -37,10 +37,14 @@
 |---|---|
 | 规范列名 | `conc`、`pop`、`age`、`prop`、`endpoint`、`mortrate`、`location` |
 | 连接键 | 坐标列（`x`/`y`、`lon`/`lat`）与/或域列；一律经 `matchable()` 渲染成定精度字符串 |
-| 场景列 | 宽表每场景一列（或栅格一个 band），`scenario=` 经 `getConc()`/`getPop()`/`getAge()`/`getMort()` 抽取 |
+| 场景列 | 宽表每场景一列（或栅格一个 band），`scenario=` 经 `.slice_conc()`/`.slice_pop()`/`.slice_age()`/`.slice_mort()` 抽取 |
+| 值列选择 | `scenario=` 是**逐输入**的列选择器，不是跨输入契约：输入无该列时用规范列（`conc`/`pop`/`prop`/`mortrate`）或唯一数值列并 `message()` 说明；多候选且无规范列必须报错列出候选，**不得猜**；不判断跨输入情景/年份是否一致 |
+| 运行输出 | 内部 join 一律显式传键（`.left_join_common()`），不得打印 dplyr 自然 join 的 `Joining with ...` 提示；`validate = "off"` 下运行除自身结果外不输出 |
 | 浓度键 | 字符，两侧同为 `dgt_conc` 位（默认 1）：暴露数据与查表都必须遵守；字符键须是 `matchable(conc, dgt_conc)` 的规范形式，否则校验期告警（`validate = "off"` 关闭） |
 | 浓度栅格存储 | 用 Float64（或已按 `dgt_conc` 取整的值）：Float32 的约 1e-6 相对误差足以把值推过取整边界，导致查不到表 |
 | 多情景栅格掩膜 | 各波段（情景）必须共享同一有效掩膜：某格只在部分波段有值时 `raster_to_grid()` **告警**并列出各层缺测数，该格从分析网格剔除；不允许逐情景缺测后静默改变网格 |
+| 非方形栅格 | 目标分辨率按轴保留（`target_res` 可传长度 1 或 2，自动检测取每轴最细），**不得**把 `resx`/`resy` 取均值后重采样；`build_grid_info()` 的 `res` 在非方形时为 `c(res_x, res_y)` |
+| 分块与空年龄块 | `age_struc` 缺档时，只含缺档年龄的块必须跳过，分块结果与不分块一致；全部块为空时走不分块路径报"无行存活"，不得中止于空块 |
 | 坐标键 | 字符，`dgt_coord` 位（默认 2） |
 | 年龄 | 字符型 5 岁分层（`"25"`、`"30"`…）；数值型年龄会被规范成整年 |
 | 死亡率单位 | 每 10 万，计算中除以 1e5 |
@@ -53,7 +57,7 @@
 
 1. **域标签来自边界**：`admin=`（shp/geojson/gpkg/sf）栅格化到目标网格，每格得到一个 `location`；栅格路径下 `admin = NULL` 时默认用 `rnaturalearth` 国界（国家级），表格路径的域标签可来自 `calc_fild` 自带的域列。这是唯一把地理信息落到格上的一步。
 2. **广播，不是插值**：`left_join` 只以 `location`（+ `age`、`endpoint`）为键，把 `prop`、`mortrate` 复制到该域的每一格。
-3. **逐格负担**：`M_格 = pop_格 × prop_域,年龄 × mortrate_域,年龄,端点 / 1e5`；PWRR 分支再乘校准项，其中 `PWRR = weighted.mean(RR(conc), pop)` 按 `(域, 年龄, 端点)` 在域内按人口加权求得，逐格用 `M × (RR(conc_cf) − 1) / PWRR / 1e5`。
+3. **逐格负担**：`M_格 = pop_格 × prop_域,年龄 × mortrate_域,年龄,端点 / 1e5`（每 10 万只在这里除一次）；PWRR 分支再乘校准项，其中 `PWRR = weighted.mean(RR(conc), pop)` 按 `(域, 年龄, 端点)` 在域内按人口加权求得，逐格用 `M_格 × (RR(conc_cf) − 1) / PWRR`。
 4. **`mort_lvl` 指定校准域**：它是 `mort_rate` 的列时按该列分组校准；不是其列时全域视为一个单位（告警）；`mort_lvl = NULL` 退化为逐格 PAF（RR 取实际浓度）。
 
 推论（改代码或换数据前必须知道）：
@@ -63,8 +67,8 @@
 - **与分辨率无关**：国级表配 0.1° 还是 1 km 是同一套键连接；网格变细只是让 `pop`/`conc` 的分布与域内校准量更细。换成省、市级只需提供对应级别的边界并设 `admin_col` 与 `mort_lvl`。
 
 ```r
-Mortality(
-  CRF       = "GEMM",
+mortality(
+  crf       = "GEMM",
   conc_real = "pm25_2015.tif",              # 网格：定义分析网格
   pop_total = "pop_2015.tif",               # 网格：按网格聚合
   age_struc = "gbd_age_structure.csv",      # 域级：location, age, prop
@@ -80,13 +84,13 @@ Mortality(
 分析网格由 `conc_real`（栅格）或 `calc_fild`（表格）唯一确定。需要复用网格、留档或交给别的工具时，用 `build_grid_info()` 生成一份 info 表（`x, y, <域名…>`）并可落盘。
 
 - **单一事实来源**：同一次分析的所有情景必须跑在同一张网格上；info 表就是这张网格的物证（带 `res`/`ext`/`crs`/`n_cells`）。
-- **交回时必须对得上**：`Mortality(calc_fild = <info 表>)` 在同时存在栅格输入时做网格一致性检查——坐标键必须落在栅格网格上：**0 个键命中即报错**（两张网格根本不同，绝不继续算）；**部分命中则告警**并给出未命中计数。两种检查都受 `validate = "off"` 关闭，**不得静默按旧网格计算**。
+- **交回时必须对得上**：`mortality(calc_fild = <info 表>)` 在同时存在栅格输入时做网格一致性检查——坐标键必须落在栅格网格上：**0 个键命中即报错**（两张网格根本不同，绝不继续算）；**部分命中则告警**并给出未命中计数。两种检查都受 `validate = "off"` 关闭，**不得静默按旧网格计算**。
 - **网格定义只由两类东西产生**：栅格输入（`conc_real` 定义网格）或用户给的 `calc_fild`；边界只提供域标签，不改变网格。
 
 ## 四、口径（未经用户确认不得更改）
 
 - **不确定性是 range，不是抽样区间**：逐格取查表 LOW/UP 再求和（共模），`CI_LOW`/`CI_UP` 为总量区间；`conc_uncert` 是**百分数**，会重跑一遍并取两条链的并集。
-- **域级中心估计 = 网格级结果按域求和**，与 `Mortality()` 自身计算自洽。
+- **域级中心估计 = 网格级结果按域求和**，与 `mortality()` 自身计算自洽。
 - **PWRR 分支**：`mort_lvl` 决定校准域，`conc_cf` 决定风险项 —— 两者不可互换。
 - 上述口径若必须变更：在同一次改动里同步 `tests/` 与 `NEWS.md`，并向用户说明数值影响与涉及的函数。
 
@@ -94,19 +98,20 @@ Mortality(
 
 ```bash
 Rscript -e 'devtools::test()'                      # 全量测试
-Rscript -e 'devtools::test(filter = "Mortality")'  # 单个测试文件
+Rscript -e 'devtools::test(filter = "mortality")'  # 单个测试文件
 Rscript -e 'devtools::document()'                  # 改 roxygen 后
 Rscript -e 'devtools::check()'                     # 完整检查
 ```
 
 - **验收门槛**：`devtools::test()` 全绿 **且** `R CMD check` 为 `Status: OK`（0 error / 0 warning / 0 note）。
-- 沙箱下 `devtools::check()` 会因为要开管道拉起 `Rcmd.exe` 而被拒；改为直调两步，产物放临时目录：
+- 沙箱下 `devtools::check()` 会因为要开管道拉起 `Rcmd.exe` 而被拒；改为直调两步，产物放临时目录。
+- **必须让 vignette 参与构建**：`--no-build-vignettes` 不会生成 `inst/doc/`，`R CMD check` 会因此报 2 个 WARNING（`no files in 'inst/doc'`、`Directory 'inst/doc' does not exist`），永远拿不到 `Status: OK`。该参数只适合不关心 vignette 的快速检查。
 
 ```powershell
 $R = 'C:\Program Files\R\R-4.6.1\bin\R.exe'
 Set-Location (New-Item -ItemType Directory -Force (Join-Path $env:TEMP 'attrmort-check'))
-& $R CMD build 'D:\GitDir\AttrMort' --no-build-vignettes
-& $R CMD check AttrMort_0.3.0.tar.gz --no-manual --no-build-vignettes
+& $R CMD build 'D:\GitDir\AttrMort'
+& $R CMD check AttrMort_0.3.0.tar.gz --no-manual
 ```
 
 ## 六、协作约定

@@ -21,25 +21,26 @@ build_grid_info(
 coordinate columns (`x`/`y`, `lon`/`lat` or `longitude`/`latitude`).}
 
 \item{pop_total}{Optional population input, aligned onto the target grid the
-way [Mortality()] aligns it. It does not define the grid's extent, but a
+way [mortality()] aligns it. It does not define the grid's extent, but a
 raster at a finer resolution than `conc_real` does lower the target
-resolution -- the same interaction [Mortality()] has.}
+resolution -- the same interaction [mortality()] has.}
 
 \item{conc_cf}{Optional counterfactual exposure. Accepted for symmetry with
-[Mortality()] so that one argument list can be reused; it is aligned like
+[mortality()] so that one argument list can be reused; it is aligned like
 the other rasters but never defines the grid.}
 
 \item{admin}{Administrative boundaries: a shapefile path, an `sf` object,
 or `NULL` (default, no domain column). Rasterized onto the grid and joined
-in, exactly as `admin =` does in [Mortality()].}
+in, exactly as `admin =` does in [mortality()].}
 
 \item{admin_col}{Character. Attribute column of `admin` holding the domain
-label. `NULL` (default) uses `"admin"`, the default of [Mortality()]; an
+label. `NULL` (default) uses `"admin"`, the default of [mortality()]; an
 unknown column falls back to the first character column of the
 boundaries.}
 
-\item{target_res}{Numeric. Target grid resolution in degrees, resolved and
-applied as in [Mortality()]. `NULL` (default) auto-detects it from the
+\item{target_res}{Numeric. Target grid resolution in degrees: one number,
+or two for the x and y cell size of a non-square grid. Resolved and
+applied as in [mortality()]; `NULL` (default) auto-detects it from the
 rasters.}
 
 \item{dgt_coord}{Integer. Decimal places used to render the coordinate keys.
@@ -60,7 +61,8 @@ A data.frame with the coordinate keys `x` and `y` (or whatever the
   never included: the table describes the grid, not the data on it. The
   georeferencing is attached as attributes:
   * `res` -- cell size in degrees (numeric): the aligned raster's
-    resolution, or the mean spacing of a tabular grid's cell centres;
+    resolution, or the spacing of a tabular grid's cell centres. One number
+    for a square grid, `c(res_x, res_y)` when the axes differ;
   * `ext` -- `c(xmin, xmax, ymin, ymax)` (numeric, length 4): the raster
     extent, or the range of the cell centres widened by half a cell;
   * `crs` -- coordinate reference system (character): the raster's CRS, or
@@ -70,21 +72,21 @@ A data.frame with the coordinate keys `x` and `y` (or whatever the
     (integer).
 }
 \description{
-Describes the grid a [Mortality()] run uses, as a table: one row per grid
+Describes the grid a [mortality()] run uses, as a table: one row per grid
 cell with the coordinate keys and the domain labels, plus the georeferencing
 of that grid as attributes.
 
-The grid is defined by `conc_real`, exactly as in [Mortality()] -- a raster
+The grid is defined by `conc_real`, exactly as in [mortality()] -- a raster
 through the pipeline's own alignment, a table through its coordinate
 columns. `pop_total`, `conc_cf` and `target_res` are read the way
-[Mortality()] reads them, so the target resolution resolved here is the one
+[mortality()] reads them, so the target resolution resolved here is the one
 that run would use. `admin` is rasterized onto the grid by the pipeline's
 own `.attach_admin()`, which is what turns boundaries into the domain
 column.
 
 The reason to have the table at all is **one grid, reused**: every scenario
 of an analysis has to run on the same grid, and this table is the object
-that says which. Hand it back as `calc_fild =` and [Mortality()] checks the
+that says which. Hand it back as `calc_fild =` and [mortality()] checks the
 keys against the rasters it is given, so a table from another grid is
 reported instead of being joined silently.
 }
@@ -101,6 +103,7 @@ attr(info, "res")       # degrees
 # One grid, several scenarios: build the table once and hand the same one
 # to every run, so the scenarios cannot drift apart
 \dontrun{
+  # Needs raster files on disk.
   scenarios <- c("base2015", "scenario2030")
   gi <- build_grid_info(conc_real = "pm25_scenarios.tif",
                         pop_total = "population.tif",
@@ -108,7 +111,7 @@ attr(info, "res")       # degrees
                         path = file.path(tempdir(), "grid_info.rds"))
 
   lapply(scenarios, function(s) {
-    Mortality(CRF = "GEMM", calc_fild = gi, scenario = s,
+    mortality(crf = "GEMM", calc_fild = gi, scenario = s,
               conc_real = "pm25_scenarios.tif", pop_total = "population.tif",
               age_struc = "age_structure.csv", mort_rate = "mortality.csv",
               mort_lvl  = "iso_a3")
@@ -116,5 +119,5 @@ attr(info, "res")       # degrees
 }
 }
 \seealso{
-[Mortality()]
+[mortality()]
 }

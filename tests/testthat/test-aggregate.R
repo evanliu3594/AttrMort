@@ -254,7 +254,7 @@ describe("aggregate_ci()", {
     expect_equal(result$total_MEAN, c(3333, 7777))
   })
 
-  # GIVEN a result suffixed with the UPPER/LOWER spellings that Mortality()'s
+  # GIVEN a result suffixed with the UPPER/LOWER spellings that mortality()'s
   # own CI argument uses, WHEN aggregate_ci() is called,
   # THEN the aliases are normalized to the canonical UP/LOW output columns.
   it("accepts _UPPER/_LOWER aliases and normalizes them to UP/LOW", {
@@ -296,7 +296,7 @@ describe("aggregate_ci()", {
     expect_equal(result$total_UP, rowSums(grid_ci()[grepl("_UP$", names(grid_ci()))]))
   })
 
-  # GIVEN a plain (no CI suffix) Mortality() result,
+  # GIVEN a plain (no CI suffix) mortality() result,
   # WHEN aggregate_ci() is called,
   # THEN it stops with a clear pointer to aggregate_mortality().
   it("stops with a clear message when no CI suffix is present", {
@@ -324,7 +324,7 @@ describe("aggregate_ci()", {
   })
 })
 
-describe("write_mortality_xlsx() (internal)", {
+describe("write_mortality_xlsx()", {
   # GIVEN an aggregated result and a path inside an existing directory,
   # WHEN write_mortality_xlsx() is called,
   # THEN one xlsx file is written and its path returned invisibly.
@@ -371,6 +371,21 @@ describe("write_mortality_xlsx() (internal)", {
         data.frame(a = 1), file.path(tempfile("nope"), "out")
       ),
       "Output directory does not exist"
+    )
+  })
+
+  # GIVEN a directory but no file name,
+  # WHEN write_mortality_xlsx() is called,
+  # THEN it stops and asks the caller for the name, because the package never
+  # invents an output file name.
+  it("refuses to invent a file name for a directory", {
+    out_dir <- tempfile("agg")
+    dir.create(out_dir)
+    on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+    expect_error(
+      write_mortality_xlsx(data.frame(a = 1), out_dir),
+      "pass the full file path"
     )
   })
 })

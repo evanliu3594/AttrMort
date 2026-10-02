@@ -1,4 +1,4 @@
-# Fingerprint regression: pins the per-column sums of every Mortality() branch.
+# Fingerprint regression: pins the per-column sums of every mortality() branch.
 #
 # The references in tests/testthat/fixtures/fingerprints/ are regenerated
 # whenever the example data or a numeric code path changes, so any drift here
@@ -19,24 +19,24 @@
 .fp_runs <- function() {
   base <- list(
     calc_fild = .attr_data("grid_info"),
-    conc_real = getConc(.attr_data("grid_exposure"), "base2015"),
-    pop_total = getPop(.attr_data("grid_pop"), "base2015"),
-    age_struc = getAge(.attr_data("national_age_structure"), "base2015"),
-    mort_rate = getMort(.attr_data("national_mortality"), "base2015"),
+    conc_real = .slice_conc(.attr_data("grid_exposure"), "base2015"),
+    pop_total = .slice_pop(.attr_data("grid_pop"), "base2015"),
+    age_struc = .slice_age(.attr_data("national_age_structure"), "base2015"),
+    mort_rate = .slice_mort(.attr_data("national_mortality"), "base2015"),
     validate  = "off"
   )
   runs <- list()
   for (model in c("GEMM", "NCD+LRI", "5COD", "IER", "IER2017", "IER2015",
                   "MRBRT", "MRBRT2019", "O3", "NO2")) {
-    runs[[paste0("crf-", model)]] <- c(list(CRF = model, mort_lvl = "location"),
+    runs[[paste0("crf-", model)]] <- c(list(crf = model, mort_lvl = "location"),
                                        base)
   }
-  runs[["gemm-lvlNULL"]] <- c(list(CRF = "GEMM", mort_lvl = NULL), base)
-  runs[["gemm-lvlMissing"]] <- c(list(CRF = "GEMM", mort_lvl = "nonexistent"),
+  runs[["gemm-lvlNULL"]] <- c(list(crf = "GEMM", mort_lvl = NULL), base)
+  runs[["gemm-lvlMissing"]] <- c(list(crf = "GEMM", mort_lvl = "nonexistent"),
                                  base)
   runs[["gemm-concCF"]] <- c(
-    list(CRF = "GEMM", mort_lvl = "location",
-         conc_cf = getConc(.attr_data("grid_exposure"), "scenario2030")),
+    list(crf = "GEMM", mort_lvl = "location",
+         conc_cf = .slice_conc(.attr_data("grid_exposure"), "scenario2030")),
     base
   )
   runs
@@ -44,7 +44,7 @@
 
 # One branch -> data.frame(column, colsum).
 .fp_summarise <- function(args) {
-  res <- suppressWarnings(suppressMessages(do.call(Mortality, args)))
+  res <- suppressWarnings(suppressMessages(do.call(mortality, args)))
   num <- res[vapply(res, is.numeric, logical(1))]
   out <- data.frame(
     column = names(num),
@@ -54,7 +54,7 @@
   out[order(out$column), ]
 }
 
-describe("Mortality() fingerprints", {
+describe("mortality() fingerprints", {
   it("matches the stored per-column sums for every branch", {
     mode <- Sys.getenv("ATTRMORT_FINGERPRINTS", "")
     skip_if(!nzchar(mode),

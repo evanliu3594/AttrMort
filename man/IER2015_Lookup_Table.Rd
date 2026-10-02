@@ -3,16 +3,21 @@
 \docType{data}
 \name{IER2015_Lookup_Table}
 \alias{IER2015_Lookup_Table}
-\title{the IER C-R curves by GBD2015.}
+\title{IER concentration-response lookup table (GBD 2015)}
 \format{
 A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
-  wide tibble: a character \code{conc} column rendered at one decimal place
-  plus one column per \code{endpoint_age} stratum.
+  wide data.frame: a character \code{conc} column rendered at one decimal
+  place plus one column per \code{endpoint_age} stratum.
+}
+\source{
+Global Burden of Disease Study 2015 comparative risk assessment
+  (Institute for Health Metrics and Evaluation), IER relative-risk curves.
 }
 \usage{
 IER2015_Lookup_Table
 }
 \description{
-the IER C-R curves by GBD2015.
+The integrated exposure-response (IER) curves for PM<sub>2.5</sub> mortality
+as used by the Global Burden of Disease 2015 comparative risk assessment.
 }
 \keyword{datasets}

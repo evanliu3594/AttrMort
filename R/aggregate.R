@@ -1,6 +1,6 @@
-# ── Aggregation & export of Mortality() results ───────────────────────────
+# ── Aggregation & export of mortality() results ───────────────────────────
 #
-# Aggregation and export of Mortality() results. Three rules are deliberate:
+# Aggregation and export of mortality() results. Three rules are deliberate:
 #
 #   1. No global state.  The attribution field is passed in through the
 #      `calc_fild` argument, and output paths are always explicit arguments.
@@ -19,7 +19,6 @@
 #   .resolve_at()              — resolve `at` to domain columns
 #   .resolve_by()              — normalize `by` to the kept dimensions
 #   .aggregate_mortality_one() — aggregate one branch of one data.frame
-#   write_mortality_xlsx()     — writexl export (Suggests-guarded)
 
 # ── internal helpers ─────────────────────────────────────────────────────
 
@@ -45,20 +44,21 @@
   age <- str_extract(base, "[^_]+$")
   endpoint <- rep(NA_character_, length(base))
   for (i in seq_along(base)) {
-    if (is.na(age[i])) next
+    if (is.na(age[i])) {
+      next
+    }
     cut <- str_length(base[i]) - str_length(age[i]) - 1L
-    if (cut < 1L) next
+    if (cut < 1L) {
+      next
+    }
     endpoint[i] <- str_sub(base[i], 1L, cut)
   }
-  data.frame(
-    name = nm, endpoint = endpoint, age = age, ci = ci,
-    stringsAsFactors = FALSE
-  )
+  tibble(name = nm, endpoint = endpoint, age = age, ci = ci)
 }
 
 #' Canonical CI branch labels
 #'
-#' `Mortality(CI = ...)` accepts `"MEAN"`, `"UPPER"` and `"LOWER"`
+#' `mortality(ci = ...)` accepts `"MEAN"`, `"UPPER"` and `"LOWER"`
 #' (`"UP"`/`"LOW"` are accepted aliases). A result assembled from those three
 #' runs is normally suffixed `_MEAN` / `_UPPER` / `_LOWER`, but `_UP` / `_LOW`
 #' is accepted too. The label returned here is the canonical one used in the
@@ -76,7 +76,7 @@
   token <- str_extract(nm, "_(MEAN|UP|UPPER|LOW|LOWER)$") |> str_remove("_")
   list(
     ci = unname(.ci_aliases[token]),
-    stem = ifelse(is.na(token), nm, str_remove(nm, "_(MEAN|UP|UPPER|LOW|LOWER)$"))
+    stem = if_else(is.na(token), nm, str_remove(nm, "_(MEAN|UP|UPPER|LOW|LOWER)$"))
   )
 }
 
@@ -88,7 +88,7 @@
   !is.na(parse$age) & str_detect(parse$age, "[0-9]") & !is.na(parse$endpoint)
 }
 
-#' Mortality (value) column names of a data.frame
+#' mortality (value) column names of a data.frame
 #'
 #' A mortality column is `\{endpoint\}_\{age\}`, optionally followed by a CI
 #' suffix (`_MEAN`, `_UP`, `_LOW`).  Nothing else is treated as a value column.
@@ -112,7 +112,7 @@
 #' @noRd
 .resolve_at <- function(x, at, value_cols, calc_fild = NULL) {
   if (!is.character(at)) {
-    stop("`at` must be \"grid\", \"geo\", or a character vector of column names.")
+    .abort("`at` must be \"grid\", \"geo\", or a character vector of column names.")
   }
   if (identical(at, "grid")) {
     return(character(0))
@@ -126,20 +126,19 @@
     return(setdiff(domain, value_cols))
   }
   if (anyNA(at) || any(at == "")) {
-    stop(
+    .abort(str_c(
       "`at` must be \"grid\", \"geo\", or a character vector of column names. ",
-      "Got: ", paste(utils::capture.output(str(at)), collapse = " ")
-    )
+      "Got: {paste(utils::capture.output(str(at)), collapse = \" \")}"
+    ))
   }
   available <- union(names(x), if (is.data.frame(calc_fild)) names(calc_fild))
   missing_cols <- setdiff(at, available)
   if (length(missing_cols) > 0L) {
-    stop(
+    .abort(str_c(
       "Domain column(s) not found in `x`: ",
-      paste0("`", missing_cols, "`") |> paste(collapse = ", "),
-      ". Available columns: ",
-      paste0("`", names(x), "`") |> paste(collapse = ", "), "."
-    )
+      "{paste0(\"`\", missing_cols, \"`\") |> paste(collapse = \", \")}. Available columns: ",
+      "{paste0(\"`\", names(x), \"`\") |> paste(collapse = \", \")}."
+    ))
   }
   unique(at)
 }
@@ -151,10 +150,10 @@
 .resolve_by <- function(by) {
   valid_by <- c("total", "endpoint", "age", "all")
   if (!is.character(by) || length(by) != 1L || !by %in% valid_by) {
-    stop(
-      "`by` must be one of: \"", paste(valid_by, collapse = "\", \""),
-      "\". Got: ", paste(utils::capture.output(str(by)), collapse = " ")
-    )
+    .abort(str_c(
+      "`by` must be one of: \"{paste(valid_by, collapse = \"\\\", \\\"\")}\". ",
+      "Got: {paste(utils::capture.output(str(by)), collapse = \" \")}"
+    ))
   }
   switch(by,
     total = character(0),
@@ -186,21 +185,21 @@
 .aggregate_mortality_one <- function(x, value_cols, keep, domain, keys,
                                      total_name, na_rm, parse) {
   if (length(keep) != length(value_cols)) {
-    stop("Internal error: `keep` must have one flag per element of `value_cols`.")
+    .abort("Internal error: `keep` must have one flag per element of `value_cols`.")
   }
   value_cols <- value_cols[keep]
   if (length(value_cols) == 0L) {
-    stop("Internal error: no mortality columns selected for `", total_name, "`.")
+    .abort("Internal error: no mortality columns selected for `{total_name}`.")
   }
   info <- parse[match(names(value_cols), parse$name), , drop = FALSE]
 
   if (length(domain) == 0L && length(keys) == 0L) {
     # at = "grid", by = "total": only append the total column.
     if (total_name %in% names(x)) {
-      stop(
-        "Column `", total_name, "` already exists in `x`; it would collide with ",
+      .abort(str_c(
+        "Column `{total_name}` already exists in `x`; it would collide with ",
         "the aggregated total column. Rename it before aggregating."
-      )
+      ))
     }
     return(
       x |>
@@ -216,10 +215,10 @@
   domain <- unique(domain)
   margin_cols <- unique(c(domain, keys))
   if (total_name %in% names(x) && !total_name %in% margin_cols) {
-    stop(
-      "Column `", total_name, "` already exists in `x`; it would collide with ",
+    .abort(str_c(
+      "Column `{total_name}` already exists in `x`; it would collide with ",
       "the aggregated total column. Rename it before aggregating."
-    )
+    ))
   }
 
   # Long form: one row per (domain, endpoint, age).  Labels are attached before
@@ -294,7 +293,7 @@
 #' Aggregate grid-level attributable mortality by domain
 #'
 #' @description
-#' Takes the wide grid-level output of [Mortality()] — one row per grid cell,
+#' Takes the wide grid-level output of [mortality()] — one row per grid cell,
 #' one column per `\{endpoint\}_\{age\}` combination, plus the coordinate columns
 #' (`x`/`y`) and any domain columns carried over from the attribution field —
 #' and aggregates it to administrative domains.
@@ -312,7 +311,7 @@
 #' Only the explicitly listed `\{endpoint\}_\{age\}` columns are summed — the
 #' coordinate columns are never part of the sum.
 #'
-#' @param x A data.frame from [Mortality()], or a named list of them (one per
+#' @param x A data.frame from [mortality()], or a named list of them (one per
 #'   scenario).  The name of each element is used as the `scenario` column of
 #'   the corresponding output.
 #' @param calc_fild Optional attribution field (a data.frame with `x`/`y` and
@@ -335,24 +334,25 @@
 #'   `total` column is returned alongside the marginals; for `by = "all"` the
 #'   `\{endpoint\}_\{age\}` columns are returned alongside it.
 #' @param na_rm Logical. Drop `NA` when summing (passed to `sum()` as
-#'   `na.rm`). Default `TRUE`, matching [Mortality()]'s use of `na.rm = TRUE`.
+#'   `na.rm`). Default `TRUE`, matching [mortality()]'s use of `na.rm = TRUE`.
 #'
 #' @return A data.frame with the domain columns, a `total` column, the requested
 #'   marginals, and a `scenario` column when `x` was a named list.
 #'
-#' @seealso [aggregate_ci()] for CI-branch (`Mortality(CI = ...)`) output,
-#'   [write_mortality_xlsx()] is internal; write with `writexl::write_xlsx()`.
+#' @seealso [aggregate_ci()] for CI-branch (`mortality(ci = ...)`) output,
+#'   [write_mortality_xlsx()] to write a result to a caller-supplied `path`.
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
-#'   grid <- Mortality(
-#'     CRF = "GEMM", calc_fild = grid_info,
-#'     conc_real = getConc(grid_exposure, "base2015"),
-#'     pop_total = getPop(grid_pop, "base2015"),
-#'     age_struc = getAge(national_age_structure, "base2015"),
-#'     mort_rate = getMort(national_mortality, "base2015"),
+#' Needs a mortality() result to post-process; see its examples.
+#'   grid <- mortality(
+#'     crf = "GEMM", calc_fild = grid_info,
+#'     conc_real = .slice_conc(grid_exposure, "base2015"),
+#'     pop_total = .slice_pop(grid_pop, "base2015"),
+#'     age_struc = .slice_age(national_age_structure, "base2015"),
+#'     mort_rate = .slice_mort(national_mortality, "base2015"),
 #'     mort_lvl = "location"
 #'   )
 #'
@@ -373,40 +373,41 @@ aggregate_mortality <- function(x, calc_fild = NULL, at = "location",
   inputs <- .as_named_inputs(x)
 
   if (!is.logical(na_rm) || length(na_rm) != 1L || is.na(na_rm)) {
-    stop("`na_rm` must be TRUE or FALSE.")
+    .abort("`na_rm` must be TRUE or FALSE.")
   }
 
   value_names <- .mort_names(inputs[[1L]])
   ci_suffixed <- !is.na(.split_ci_suffix(value_names)$ci)
   if (any(ci_suffixed)) {
-    stop(
-      "`x` mixes plain and CI-suffixed mortality columns (found ",
-      paste0("`", utils::head(value_names[ci_suffixed], 3L), "`") |>
-        paste(collapse = ", "),
-      "). Use aggregate_mortality() for plain output and aggregate_ci() for ",
-      "`Mortality(CI = ...)` output."
-    )
+    found_txt <- paste0("`", utils::head(value_names[ci_suffixed], 3L), "`") |>
+      paste(collapse = ", ")
+    .abort(str_c(
+      "`x` mixes plain and CI-suffixed mortality columns (found {found_txt}). ",
+      "Use aggregate_mortality() for plain output and aggregate_ci() for ",
+      "`mortality(ci = ...)` output."
+    ))
   }
   if (length(value_names) == 0L) {
-    stop(
+    .abort(str_c(
       "No endpoints x age columns found in `x`. Expected columns named ",
-      "`{endpoint}_{age}` (e.g. `ncd+lri_50`, `ihd_25`). A result carrying CI ",
+      "`{{endpoint}}_{{age}}` (e.g. `ncd+lri_50`, `ihd_25`). A result carrying CI ",
       "suffixes (`_MEAN`, `_UP`, `_LOW`) must be passed to aggregate_ci()."
-    )
+    ))
   }
 
-  value_cols <- stats::setNames(value_names, value_names)
+  value_cols <- set_names(value_names)
   domain <- .resolve_at(inputs[[1L]], at, value_names, calc_fild = calc_fild)
   keys <- .resolve_by(by)
 
   out <- inputs |>
-    map(function(df) {
-      df <- .join_calc_fild(df, calc_fild, domain)
+    map(function(result) {
+      result <- .join_calc_fild(result, calc_fild, domain)
       .aggregate_mortality_one(
-        x = df, value_cols = value_cols, keep = rep(TRUE, length(value_cols)),
+        x = result, value_cols = value_cols,
+        keep = rep(TRUE, length(value_cols)),
         domain = domain, keys = keys,
         total_name = "total", na_rm = na_rm,
-        parse = .split_mort_names(names(df))
+        parse = .split_mort_names(names(result))
       )
     })
 
@@ -415,21 +416,21 @@ aggregate_mortality <- function(x, calc_fild = NULL, at = "location",
 
 # ── aggregate_ci ─────────────────────────────────────────────────────────
 
-#' Aggregate Mortality() output carrying CI branches
+#' Aggregate mortality() output carrying CI branches
 #'
 #' @description
 #' Accepts a mortality result whose columns are named `\{endpoint\}_\{age\}_\{CI\}`
-#' with `CI` in `MEAN`/`UP`/`LOW` — the three CI branches of [Mortality()]
+#' with `ci` in `MEAN`/`UP`/`LOW` — the three CI branches of [mortality()]
 #' sitting side by side in the same data.frame — and aggregates each branch
 #' independently by domain.  Every row of the result keeps the three branches
 #' together, as `total_MEAN` / `total_UP` / `total_LOW` (and
 #' `\{endpoint\}_all_MEAN` / `..._UP` / `..._LOW`, etc., for `by = "endpoint"`
 #' or `by = "age"`).
 #'
-#' [Mortality()] itself does not append the `CI` suffix, so build the input by
+#' [mortality()] itself does not append the `ci` suffix, so build the input by
 #' running it once per branch and pasting the suffix on, e.g.
-#' `paste0(names(x), "_MEAN")` for the `CI = "MEAN"` run.  `_UPPER` / `_LOWER`
-#' (the names [Mortality()] uses for its `CI` argument) are accepted as aliases
+#' `paste0(names(x), "_MEAN")` for the `ci = "MEAN"` run.  `_UPPER` / `_LOWER`
+#' (the names [mortality()] uses for its `ci` argument) are accepted as aliases
 #' and normalized to `_UP` / `_LOW` in the output.
 #'
 #' The column-name convention is the one described in [aggregate_mortality()],
@@ -454,16 +455,17 @@ aggregate_mortality <- function(x, calc_fild = NULL, at = "location",
 #'
 #' @examples
 #' \dontrun{
-#'   run <- function(ci) Mortality(
-#'     CRF = "GEMM", CI = ci, calc_fild = grid_info,
-#'     conc_real = getConc(grid_exposure, "base2015"),
-#'     pop_total = getPop(grid_pop, "base2015"),
-#'     age_struc = getAge(national_age_structure, "base2015"),
-#'     mort_rate = getMort(national_mortality, "base2015"),
+#' Needs the three CI-suffixed tables built by three mortality() runs.
+#'   run <- function(ci) mortality(
+#'     crf = "GEMM", ci = ci, calc_fild = grid_info,
+#'     conc_real = .slice_conc(grid_exposure, "base2015"),
+#'     pop_total = .slice_pop(grid_pop, "base2015"),
+#'     age_struc = .slice_age(national_age_structure, "base2015"),
+#'     mort_rate = .slice_mort(national_mortality, "base2015"),
 #'     mort_lvl = "location"
 #'   )
 #'
-#'   # Mortality() does not add the CI suffix — paste it on per branch
+#'   # mortality() does not add the CI suffix — paste it on per branch
 #'   mean_ <- run("MEAN"); up <- run("UPPER"); low <- run("LOWER")
 #'   vals <- setdiff(names(mean_), c("x", "y", "location"))
 #'   names(mean_)[names(mean_) %in% vals] <- paste0(vals, "_MEAN")
@@ -484,54 +486,54 @@ aggregate_ci <- function(x, calc_fild = NULL, at = "location", by = "total") {
 
   ci_cols <- parse$name[!is.na(parse$ci)]
   if (length(ci_cols) == 0L) {
-    stop(
+    .abort(str_c(
       "No CI-suffixed columns found in `x`. aggregate_ci() expects columns ",
-      "named `{endpoint}_{age}_{CI}` with CI in MEAN/UP/LOW ",
+      "named `{{endpoint}}_{{age}}_{{CI}}` with CI in MEAN/UP/LOW ",
       "(`_UPPER`/`_LOWER` are accepted aliases), i.e. the MEAN, UP and LOW ",
-      "runs of Mortality() side by side. For plain `{endpoint}_{age}` output ",
+      "runs of mortality() side by side. For plain `{{endpoint}}_{{age}}` output ",
       "use aggregate_mortality()."
-    )
+    ))
   }
 
   found <- unique(parse$ci[!is.na(parse$ci)])
   missing_ci <- setdiff(.ci_branches, found)
   if (length(missing_ci) > 0L) {
-    stop(
-      "Incomplete CI triplet in `x`: found ", paste(found, collapse = ", "),
-      " but missing ", paste(missing_ci, collapse = ", "),
-      ". aggregate_ci() needs MEAN, UP and LOW side by side."
-    )
+    .abort(str_c(
+      "Incomplete CI triplet in `x`: found {paste(found, collapse = \", \")} ",
+      "but missing {paste(missing_ci, collapse = \", \")}. aggregate_ci() needs MEAN, ",
+      "UP and LOW side by side."
+    ))
   }
 
   unparsed <- ci_cols[is.na(parse$endpoint[match(ci_cols, parse$name)])]
   if (length(unparsed) > 0L) {
-    stop(
+    .abort(str_c(
       "Cannot parse CI column name(s): ",
-      paste0("`", unparsed, "`") |> paste(collapse = ", "),
-      ". Expected `{endpoint}_{age}_{CI}`."
-    )
+      "{paste0(\"`\", unparsed, \"`\") |> paste(collapse = \", \")}. ",
+      "Expected `{{endpoint}}_{{age}}_{{CI}}`."
+    ))
   }
 
-  value_cols <- stats::setNames(ci_cols, ci_cols)
+  value_cols <- set_names(ci_cols)
   domain <- .resolve_at(inputs[[1L]], at, ci_cols, calc_fild = calc_fild)
   keys <- .resolve_by(by)
 
   out <- inputs |>
-    map(function(df) {
-      df <- .join_calc_fild(df, calc_fild, domain)
-      df_parse <- .split_mort_names(names(df))
+    map(function(result) {
+      result <- .join_calc_fild(result, calc_fild, domain)
+      result_parse <- .split_mort_names(names(result))
       # aliases are normalized, so `_UPPER`/`_LOWER` inputs still produce the
       # canonical `total_UP` / `total_LOW` output columns
-      df_branch <- stats::setNames(
-        df_parse$ci[match(ci_cols, df_parse$name)], ci_cols
+      col_branch <- set_names(
+        result_parse$ci[match(ci_cols, result_parse$name)], ci_cols
       )
 
       branches <- .ci_branches |>
         map(function(ci) {
           branch <- .aggregate_mortality_one(
-            x = df, value_cols = value_cols, keep = df_branch == ci,
+            x = result, value_cols = value_cols, keep = col_branch == ci,
             domain = domain, keys = keys,
-            total_name = "total", na_rm = TRUE, parse = df_parse
+            total_name = "total", na_rm = TRUE, parse = result_parse
           )
           # suffix every value column — total as well as the marginals — with
           # the branch label, so the three branches never collide on a name
@@ -572,65 +574,89 @@ aggregate_ci <- function(x, calc_fild = NULL, at = "location", by = "total") {
     return(list(scenario = x))
   }
   if (!is.list(x) || length(x) == 0L) {
-    stop(
+    .abort(str_c(
       "`x` must be a data.frame or a non-empty named list of data.frames. Got: ",
-      class(x)[1L]
-    )
+      "{class(x)[1L]}"
+    ))
   }
   bad <- !map_lgl(x, is.data.frame)
   if (any(bad)) {
-    stop(
+    .abort(str_c(
       "Every element of `x` must be a data.frame. Not a data.frame: ",
-      paste0("`", names(x)[bad], "`") |> paste(collapse = ", ")
-    )
+      "{paste0(\"`\", names(x)[bad], \"`\") |> paste(collapse = \", \")}"
+    ))
   }
   if (is.null(names(x)) || any(names(x) == "")) {
-    stop(
+    .abort(str_c(
       "`x` must be a NAMED list. Name each element (e.g. with `set_names()` or ",
       "`list(base2015 = ..., SSP1_2030 = ...)`)."
-    )
+    ))
   }
   x
 }
 
 #' Join the attribution field into a grid-level result when it is needed
 #'
-#' @param df A grid-level result.
+#' @param result A grid-level result.
 #' @param calc_fild The attribution field, or `NULL`.
 #' @param domain Domain columns required by the aggregation.
-#' @return `df`, with the missing domain columns added from `calc_fild`.
+#' @return `result`, with the missing domain columns added from `calc_fild`.
 #' @noRd
 .join_calc_fild <- function(df, calc_fild, domain) {
   if (is.null(calc_fild) || all(domain %in% names(df))) {
     return(df)
   }
   if (!is.data.frame(calc_fild)) {
-    stop("`calc_fild` must be a data.frame or NULL.")
+    .abort("`calc_fild` must be a data.frame or NULL.")
   }
 
-  shared <- intersect(
-    setdiff(names(df), c(.mort_names(df), .is_coord_cols(df))),
-    setdiff(names(calc_fild), .is_coord_cols(calc_fild))
-  )
-  if (length(shared) == 0L) {
-    shared <- intersect(.is_coord_cols(df), .is_coord_cols(calc_fild))
+  # Coordinates first: `result` is one row per grid cell, so joining it on a
+  # coarser domain column copies a whole domain's rows onto every cell of it
+  # (two cells, two provinces, both provinces get the national total). A domain
+  # join is only used when there is no full coordinate pair to match on, i.e.
+  # for a result that is already domain-level.
+  coords_r <- .is_coord_cols(result)
+  coords_c <- .is_coord_cols(calc_fild)
+  shared <- if (length(coords_r) > 0 && length(coords_r) == length(coords_c)) {
+    intersect(coords_r, coords_c)
+  } else {
+    character(0)
   }
   if (length(shared) == 0L) {
-    stop(
-      "Cannot join `calc_fild` to `x`: no shared domain or coordinate column. ",
-      "`x` has ", paste0("`", names(df), "`") |> paste(collapse = ", "),
-      "; `calc_fild` has ",
-      paste0("`", names(calc_fild), "`") |> paste(collapse = ", "), "."
+    shared <- intersect(
+      setdiff(names(result), c(.mort_names(result), coords_r)),
+      setdiff(names(calc_fild), coords_c)
     )
   }
+  if (length(shared) == 0L) {
+    .abort(str_c(
+      "Cannot join `calc_fild` to `x`: no shared domain or coordinate column. ",
+      "`x` has ",
+      "{paste0(\"`\", names(result), \"`\") |> paste(collapse = \", \")}; ",
+      "`calc_fild` has ",
+      "{paste0(\"`\", names(calc_fild), \"`\") |> paste(collapse = \", \")}."
+    ))
+  }
 
-  joined <- left_join(df, calc_fild, by = shared)
+  # A skeleton that repeats a key would multiply the result rows, which is a
+  # data fault rather than something to average away.
+  dup <- sum(duplicated(calc_fild[shared]))
+  if (dup > 0L) {
+    .abort(str_c(
+      "`calc_fild` is not unique on the join key(s) ",
+      "{paste0(\"`\", shared, \"`\") |> paste(collapse = \", \")}: ",
+      dup, " duplicated row(s). A repeated key would multiply the result."
+    ))
+  }
+
+  joined <- left_join(result, calc_fild, by = shared)
   still_missing <- setdiff(domain, names(joined))
   if (length(still_missing) > 0L) {
-    stop(
-      "Domain column(s) ", paste0("`", still_missing, "`") |> paste(collapse = ", "),
+    .abort(str_c(
+      "Domain column(s) ",
+      "{paste0(\"`\", still_missing, \"`\") |> paste(collapse = \", \")}",
       " are absent from both `x` and `calc_fild`."
-    )
+    ))
   }
   joined
 }
@@ -646,36 +672,51 @@ aggregate_ci <- function(x, calc_fild = NULL, at = "location", by = "total") {
     return(out[[1L]])
   }
   out |>
-    imap(function(df, nm) df |> mutate(scenario = nm, .before = 1L)) |>
+    imap(function(result, nm) mutate(result, scenario = nm, .before = 1L)) |>
     bind_rows()
 }
 
-# ── export helper (internal) ─────────────────────────────────────────────
+# ── export helper ────────────────────────────────────────────────────────
 
-#' Write aggregation results to an xlsx workbook
+#' Write mortality results to an xlsx workbook
 #'
-#' Internal helper: writes a single data.frame, or a named list of data.frames
-#' (one sheet per element), with `writexl::write_xlsx()`.  `writexl` is only a
-#' `Suggests` dependency, so the call is guarded by `requireNamespace()` and
-#' fails with an actionable message when the package is absent.
+#' Writes a single data.frame, or a named list of data.frames (one sheet per
+#' element), with `writexl::write_xlsx()`. `writexl` is a `Suggests`
+#' dependency, so the call is guarded by `requireNamespace()` and fails with an
+#' actionable message when the package is absent.
+#'
+#' Where the file goes is always the caller's decision: `path` is either the
+#' full file path (an `.xlsx` extension is added when missing), or an existing
+#' directory together with an explicit `suffix` naming the file. No output file
+#' name is ever invented by the package.
 #'
 #' @param results A data.frame, or a named list of data.frames.
-#' @param path Output file path. When `path` is an existing directory (or ends
-#'   in a path separator) the file is created inside it; otherwise `path` is
-#'   used as the file name. Its extension should be `.xlsx`.
-#' @param suffix Optional character. When given, the output file is named
-#'   `<suffix>.xlsx` inside the directory of `path` (existing directories only —
-#'   this helper never creates directories implicitly).
+#' @param path Character. Full output file path, or an existing directory when
+#'   `suffix` is given.
+#' @param suffix Optional character. File name without extension, created
+#'   inside the directory `path`.
 #'
 #' @return The normalized output path, invisibly.
-#' @noRd
+#' @export
+#'
+#' @seealso [aggregate_mortality()], [aggregate_ci()]
+#'
+#' @examples
+#' \dontrun{
+#' Writes files, so it is not run by R CMD check.
+#'   out <- data.frame(location = "A", total = 1)
+#'   write_mortality_xlsx(out, path = "location_total_260930.xlsx")
+#'   write_mortality_xlsx(out, path = "output", suffix = "location_total_260930")
+#' }
 write_mortality_xlsx <- function(results, path, suffix = NULL) {
   if (!requireNamespace("writexl", quietly = TRUE)) {
-    stop(
-      "Writing xlsx output requires the `writexl` package, which is not ",
-      "installed (it is a Suggests dependency of AttrMort).\n",
-      "Install it with install.packages(\"writexl\"), or pass the path to ",
-      "another writer (e.g. openxlsx::write.xlsx())."
+    .abort(
+      str_c(
+        "Writing xlsx output requires the `writexl` package, which is not ",
+        "installed (it is a Suggests dependency of AttrMort).\n",
+        "Install it with install.packages(\"writexl\"), or pass the path to ",
+        "another writer (e.g. openxlsx::write.xlsx())."
+      )
     )
   }
 
@@ -684,9 +725,11 @@ write_mortality_xlsx <- function(results, path, suffix = NULL) {
   }
   if (!is.list(results) || length(results) == 0L ||
     !all(map_lgl(results, is.data.frame))) {
-    stop(
-      "`results` must be a data.frame or a non-empty list of data.frames. Got: ",
-      class(results)[1L]
+    .abort(
+      str_c(
+        "`results` must be a data.frame or a non-empty list of data.frames. Got: ",
+        "{class(results)[1L]}"
+      )
     )
   }
   if (is.null(names(results)) || any(names(results) == "")) {
@@ -695,23 +738,34 @@ write_mortality_xlsx <- function(results, path, suffix = NULL) {
   names(results) <- str_sub(names(results), 1L, 31L)
 
   if (!is.character(path) || length(path) != 1L || is.na(path)) {
-    stop("`path` must be a single character file or directory path.")
+    .abort(
+      "`path` must be a single character file or directory path."
+    )
   }
   if (!is.null(suffix)) {
-    if (!is.character(suffix) || length(suffix) != 1L || is.na(suffix)) {
-      stop("`suffix` must be NULL or a single character string.")
+    if (!is.character(suffix) || length(suffix) != 1L || is.na(suffix) || !nzchar(suffix)) {
+      .abort(
+        "`suffix` must be NULL or a non-empty file name without extension."
+      )
     }
     path <- file.path(path, paste0(suffix, ".xlsx"))
   } else if (dir.exists(path) || str_ends(path, regex("[/\\\\]$"))) {
-    path <- file.path(path, "mortality_aggregate.xlsx")
+    .abort(
+      str_c(
+        "`path` is a directory: pass the full file path, or name the file with ",
+        "`suffix =`."
+      )
+    )
   }
   if (!str_detect(tolower(path), "\\.xlsx$")) {
     path <- paste0(path, ".xlsx")
   }
   if (!dir.exists(dirname(path))) {
-    stop(
-      "Output directory does not exist: ", dirname(path),
-      ". Create it first, or pass a path inside an existing directory."
+    .abort(
+      str_c(
+        "Output directory does not exist: ",
+        "{dirname(path)}. Create it first, or pass a path inside an existing directory."
+      )
     )
   }
 

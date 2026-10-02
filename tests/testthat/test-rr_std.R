@@ -1,8 +1,8 @@
-# Tests for RR_std() — concentration-response lookup standardisation
+# Tests for rr_std() — concentration-response lookup standardisation
 
-describe("RR_std()", {
+describe("rr_std()", {
   it("returns a join-ready long table with character conc keys", {
-    out <- RR_std("GEMM", "MEAN")
+    out <- rr_std("GEMM", "MEAN")
     expect_s3_class(out, "data.frame")
     expect_equal(names(out), c("conc", "endpoint", "age", "RR"))
     expect_type(out$conc, "character")
@@ -11,43 +11,43 @@ describe("RR_std()", {
   })
 
   it("keeps the conc keys at the requested precision", {
-    d1 <- RR_std("GEMM", "MEAN", dgt = 1)$conc
+    d1 <- rr_std("GEMM", "MEAN", dgt = 1)$conc
     expect_true(all(grepl("^[0-9]+(\\.[0-9])?$", d1)))
-    expect_equal(RR_std("GEMM", "MEAN", dgt = 0)$conc,
+    expect_equal(rr_std("GEMM", "MEAN", dgt = 0)$conc,
                  matchable(as.numeric(d1), 0))
-    expect_equal(RR_std("GEMM", "MEAN", dgt = 2)$conc,
+    expect_equal(rr_std("GEMM", "MEAN", dgt = 2)$conc,
                  matchable(as.numeric(d1), 2))
   })
 
   it("matches model names case-insensitively", {
-    expect_equal(RR_std("gemm", "MEAN"), RR_std("GEMM", "MEAN"))
+    expect_equal(rr_std("gemm", "MEAN"), rr_std("GEMM", "MEAN"))
   })
 
   it("accepts CI aliases and rejects anything else", {
-    expect_equal(RR_std("GEMM", "UPPER"), RR_std("GEMM", "UP"))
-    expect_equal(RR_std("GEMM", "lower"), RR_std("GEMM", "LOW"))
-    expect_error(RR_std("GEMM", "MEANING"), "must be one of")
+    expect_equal(rr_std("GEMM", "UPPER"), rr_std("GEMM", "UP"))
+    expect_equal(rr_std("GEMM", "lower"), rr_std("GEMM", "LOW"))
+    expect_error(rr_std("GEMM", "MEANING"), "must be one of")
   })
 
   it("rejects an unknown model with the list of valid names", {
-    expect_error(RR_std("UNKNOWN_MODEL"), "Unknown CR model")
-    expect_error(RR_std("UNKNOWN_MODEL"), "MRBRT")
+    expect_error(rr_std("UNKNOWN_MODEL"), "Unknown CR model")
+    expect_error(rr_std("UNKNOWN_MODEL"), "MRBRT")
   })
 
   it("formats NCD+LRI for ages 25 and above", {
-    out <- RR_std("NCD+LRI", "MEAN")
+    out <- rr_std("NCD+LRI", "MEAN")
     expect_equal(unique(out$endpoint), "ncd+lri")
     ages <- as.integer(unique(out$age))
     expect_true(all(ages >= 25) && all(ages <= 95))
   })
 
   it("formats 5COD with its five endpoints", {
-    out <- RR_std("5COD", "MEAN")
+    out <- rr_std("5COD", "MEAN")
     expect_setequal(unique(out$endpoint), c("copd", "ihd", "lc", "lri", "stroke"))
   })
 
   it("restricts IER endpoints to the ages they apply to", {
-    out <- RR_std("IER", "MEAN")
+    out <- rr_std("IER", "MEAN")
     lri <- as.integer(out$age[out$endpoint == "lri"])
     other <- as.integer(out$age[out$endpoint != "lri"])
     expect_true(all(lri < 5))
@@ -55,14 +55,14 @@ describe("RR_std()", {
   })
 
   it("returns only COPD for O3 and only all-cause for NO2", {
-    expect_equal(unique(RR_std("O3", "MEAN")$endpoint), "copd")
-    expect_equal(unique(RR_std("NO2", "MEAN")$endpoint), "allcause")
+    expect_equal(unique(rr_std("O3", "MEAN")$endpoint), "copd")
+    expect_equal(unique(rr_std("NO2", "MEAN")$endpoint), "allcause")
   })
 
   it("returns all three CI tables for every model", {
     for (model in cr_models()) {
       for (index in c("MEAN", "UP", "LOW")) {
-        out <- RR_std(model, index)
+        out <- rr_std(model, index)
         expect_gt(nrow(out), 0)
         expect_false(anyNA(out$RR))
       }
@@ -79,7 +79,7 @@ describe("cr_models()", {
 describe("built-in lookup tables", {
   it("store conc keys as character at one decimal place", {
     # The data contract applies to the shipped tables themselves, not only to
-    # what RR_std() renders: NO2 used to be a double column with ~1e-12
+    # what rr_std() renders: NO2 used to be a double column with ~1e-12
     # floating-point tail, which matchable() happened to paper over.
     tables <- c(
       "GEMM_Lookup_Table", "IER2010_Lookup_Table", "IER2013_Lookup_Table",

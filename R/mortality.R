@@ -1,6 +1,6 @@
 # ── Core: attributable mortality ────────────────────────────────────────
 #
-# Mortality() orchestrates: spatial alignment -> ingestion -> column
+# mortality() orchestrates: spatial alignment -> ingestion -> column
 # mapping -> admin join -> scenario extraction -> validation -> computation.
 # The computation itself lives in .calc_attributable() and is deliberately
 # free of I/O so that it can be reasoned about on its own.
@@ -23,25 +23,30 @@
 
 # Every input must carry its value columns and share at least one join key
 # with calc_fild. All problems are reported at once, then the call aborts.
-.check_inputs <- function(datasets, calc_fild) {
+.check_inputs <- function(datasets, calc_fild, group = NULL) {
   key_cols <- names(calc_fild)
   problems <- character(0)
 
   for (nm in names(datasets)) {
     ds <- datasets[[nm]]
-    if (is.null(ds)) next
+    if (is.null(ds)) {
+      next
+    }
+    # `nm` selects the required columns, the label only names the dataset in
+    # the message: `decompose()` checks two groups of the same roles.
+    what <- if (is.null(group)) nm else str_c(nm, " (", group, ")")
 
     missing_val <- setdiff(.REQUIRED_VALUE_COLS[[nm]], names(ds))
     if (length(missing_val) > 0) {
       problems <- c(problems, sprintf(
         "`%s` is missing required column(s): %s.",
-        nm, paste0("`", missing_val, "`", collapse = ", ")
+        what, paste0("`", missing_val, "`", collapse = ", ")
       ))
     }
     if (length(intersect(names(ds), key_cols)) == 0) {
       problems <- c(problems, sprintf(
         "`%s` shares no join key with `calc_fild` (keys available: %s; `%s` has: %s).",
-        nm, paste0("`", key_cols, "`", collapse = ", "), nm,
+        what, paste0("`", key_cols, "`", collapse = ", "), what,
         paste0("`", names(ds), "`", collapse = ", ")
       ))
     }
@@ -62,95 +67,46 @@
     } else {
       ""
     }
-    stop(
-      "Invalid input data:\n  - ", paste(problems, collapse = "\n  - "), hint,
-      call. = FALSE
-    )
+    problems_txt <- paste(problems, collapse = "\n  - ")
+    .abort("Invalid input data:\n  - {problems_txt}{hint}")
   }
   invisible(TRUE)
 }
 
 # Coordinate keys of a gridded data.frame, one "x y" string per cell; NULL
 # when the table carries no coordinate pair to key on.
-.grid_keys <- function(df) {
-  if (!is.data.frame(df)) {
+.grid_keys <- function(grid) {
+  if (!is.data.frame(grid)) {
     return(NULL)
   }
-  xy <- .grid_xy(df)
+  xy <- .grid_xy(grid)
   if (length(xy) != 2) {
     return(NULL)
   }
-  unique(paste(df[[xy[1]]], df[[xy[2]]]))
+  unique(paste(grid[[xy[1]]], grid[[xy[2]]]))
 }
 
-# Check a `calc_fild` against the raster grid, at two levels of severity.
-#
-# A raster input defines the analysis grid, and a coordinate-keyed `calc_fild`
-# is joined against it. A skeleton handed back from an earlier run -- a
-# `build_grid_info()` table, or one written for another resolution -- would
-# otherwise restrict the analysis to whatever happens to overlap, silently.
-# No key in common at all means the two are different grids, so the call stops;
-# a partial overlap is reported as a warning, because coarser skeletons are
-# legal (a table of domain centroids is one). `validate = "off"` turns both off
-# with the rest of the validation.
-.check_grid_match <- function(calc_fild, raster_grids, res = NA_real_) {
-  keys <- .grid_keys(calc_fild)
-  grid <- unique(unlist(lapply(raster_grids, .grid_keys), use.names = FALSE))
-  if (is.null(keys) || length(grid) == 0) {
-    return(invisible(FALSE))
-  }
-
-  matched <- length(intersect(keys, grid))
-  if (matched == length(keys)) {
-    return(invisible(FALSE))
-  }
-
-  res_txt <- if (is.finite(res)) {
-    paste0(" (raster grid resolution ", format(res), " deg)")
-  } else {
-    ""
-  }
-  fix <- paste0(
-    ". Regenerate the table with `build_grid_info()` from the same rasters, ",
-    "or set `target_res=` so that both land on one grid."
-  )
-
-  if (matched == 0) {
-    stop(
-      "`calc_fild` shares no coordinate key with the raster grid: 0 of ",
-      length(keys), " coordinate key(s) match a raster cell", res_txt,
-      ". The two are on different grids, so nothing can be joined", fix,
-      call. = FALSE
-    )
-  }
-
-  warning(
-    "`calc_fild` is not on the raster grid: ", length(keys) - matched, " of ",
-    length(keys), " coordinate key(s) match no raster cell", res_txt, fix,
-    call. = FALSE
-  )
-  invisible(TRUE)
-}
 
 # ── the grain of the run, said out loud ─────────────────────────────────
 #
-# Mortality() is grain-agnostic: `calc_fild` decides whether the analysis is
+# mortality() is grain-agnostic: `calc_fild` decides whether the analysis is
 # one row per grid cell or one row per domain, and `mort_lvl` decides whether
 # the relative risks are calibrated inside a domain. Neither is readable from
 # the arguments, and the two grains are not numerically identical -- a grid
 # run takes the population-weighted mean of the relative risks of a domain's
 # cells, a domain-only run takes the relative risk at the domain's
 # population-weighted mean concentration (a Jensen gap, see
-# domain_summary()). One line per run keeps that visible instead of letting
+# the caller guess. One line per run keeps that visible instead of letting
 # the grain be dispatched silently. `validate = "off"` is the quiet mode and
 # prints nothing at all.
 
 # Resolution of the analysis grid, in degrees: the aligned raster when one
-# defines the grid, otherwise the mean spacing of the tabular cell centres.
-# NA when there is nothing to measure.
+# defines the grid, otherwise the spacing of the tabular cell centres. One
+# number for a square grid, c(res_x, res_y) for a non-square one. NA when
+# there is nothing to measure.
 .grain_res <- function(calc_fild, template = NULL) {
   if (!is.null(template)) {
-    return(mean(terra::res(template)))
+    return(.as_res(terra::res(template)))
   }
   xy <- .grid_xy(calc_fild)
   if (length(xy) != 2) {
@@ -173,9 +129,8 @@
   where <- if (domain_grain) {
     paste0(ndom, " domain(s) with one row each")
   } else if (!is.null(dcol)) {
-    res_txt <- if (is.finite(res)) {
-      paste0(" on a ", format(signif(res, 3), trim = TRUE, scientific = FALSE),
-             " deg grid")
+    res_txt <- if (all(is.finite(res)) && length(res) > 0) {
+      paste0(" on a ", .fmt_res(res), " deg grid")
     } else {
       ""
     }
@@ -224,22 +179,35 @@
 #' rasterized onto it. See [align_to_target()] and [.resolve_target_res()]
 #' for the resolution logic.
 #'
-#' @param CRF Character. Concentration-response model name (see
+#' @param crf Character. Concentration-response model name (see
 #'   [cr_models()]; matched case-insensitively) or a data.frame with the
-#'   same structure as [RR_std()] output (`conc`, `endpoint`, `age`, `RR`).
-#' @param CI Character. Which RR table to use: `"MEAN"` (default), `"UP"` or
+#'   same structure as [rr_std()] output (`conc`, `endpoint`, `age`, `RR`).
+#' @param ci Character. Which RR table to use: `"MEAN"` (default), `"UP"` or
 #'   `"LOW"`. `"UPPER"`/`"LOWER"` are accepted as aliases. Ignored when
-#'   `CRF` is a data.frame.
+#'   `crf` is a data.frame.
 #' @param calc_fild Attribution field: the spatial/administrative skeleton
+#'   that all other inputs are joined onto. A **spatial vector layer**
+#'   (`sf`, or a path to a `.shp`/`.gpkg`/`.geojson`) is accepted as well:
+#'   it is then the boundary source, its polygons label the cells of the
+#'   exposure grid, and `admin_col` says which of its columns holds the
+#'   names (the first character column is used, with a warning, when the
+#'   name is not found).
 #'   that all other inputs are joined onto. Must contain coordinate columns
 #'   (`x`/`y`, `lon`/`lat`) and/or domain columns (`location`, `Country`,
 #'   `province`, ...).
 #'
-#'   Optional for a **raster** `conc_real` (a file path or a `SpatRaster`):
-#'   the ingestion of `conc_real` already carries the grid, so `NULL` builds
-#'   the skeleton from the ingested exposure data (`x`/`y` only, one row per
-#'   cell) and a raster-only call needs no separate attribution file. Tabular
-#'   input still requires `calc_fild`.
+#'   Optional whenever `conc_real` carries coordinates: for a **raster** (a
+#'   file path or a `SpatRaster`) the grid comes from the raster itself, and
+#'   for a **table** it is the exposure's own cells (`x`/`y`, one row per
+#'   cell, reported in a message), so a run needs no separate attribution
+#'   file. An exposure that has already been aggregated to domains has no
+#'   coordinates to build a grid from and must be given `calc_fild`.
+#'
+#'   The skeleton built that way holds coordinates only. A run whose
+#'   `mort_lvl` needs a domain column gets it from `admin` (boundaries are
+#'   rasterized onto the grid, or matched to the cell centres of a table);
+#'   without `admin` the domain-keyed inputs cannot be joined and the error
+#'   says so.
 #'
 #'   When it is supplied next to a raster input its coordinate keys are checked
 #'   against the raster grid (see `validate`): a skeleton that shares no
@@ -254,13 +222,22 @@
 #'   group with the population proportion in `prop`.
 #' @param mort_rate Cause-specific baseline mortality rate, in deaths per
 #'   100,000 population.
+#'   A `mort_lvl` that names no column of `mort_rate` falls back to the
+#'   domain column `mort_rate` carries itself, with a warning; a `mort_rate`
+#'   with no domain column at all calibrates the whole field as one unit, on
+#'   the population-weighted mean relative risk of the field -- the
+#'   counterfactual exposure does not enter that fallback.
 #' @param mort_lvl Character. Domain column used to calibrate the
 #'   population-weighted relative risk (PWRR), e.g. `"location"`. It must
 #'   exist in both `calc_fild` and `mort_rate`. `NULL` skips calibration and
 #'   computes at the finest available level.
 #' @param scenario Character. Scenario (column or raster band) to extract
-#'   from wide-format inputs via [getConc()], [getPop()], [getAge()] and
-#'   [getMort()]. `NULL` uses the inputs as given.
+#'   from wide-format inputs (one value column per role). It is a per-input
+#'   selector, not a contract across inputs:
+#'   an input that does not carry the column is used as it is when it has its
+#'   canonical column (`conc`, `pop`, `prop`, `mortrate`) or a single numeric
+#'   value column. `NULL` uses the inputs as given. The package never judges
+#'   whether the inputs belong to the same scenario or year.
 #' @param admin Administrative boundaries: a shapefile path, an `sf` object,
 #'   or `NULL`. When supplied it is rasterized onto the analysis grid and
 #'   joined into `calc_fild`. When `NULL` no domain column is added — with one
@@ -272,9 +249,12 @@
 #'   runs keep `admin = NULL` meaning "no domain column".
 #' @param admin_col Character. Attribute column of `admin` holding the admin
 #'   unit name. Renamed to `mort_lvl` when the two differ.
-#' @param target_res Numeric. Target grid resolution in degrees. `NULL`
-#'   (default) auto-detects the finest input resolution and asks for
-#'   confirmation interactively.
+#' @param target_res Numeric. Target grid resolution in degrees: one number,
+#'   or two for the x and y cell size of a non-square grid. `NULL` (default)
+#'   auto-detects the finest input resolution: grids of up to 5e6 cells are
+#'   confirmed silently, larger ones interactively, and in a non-interactive
+#'   session a grid above 5e7 cells **falls back to 0.1 deg** with a message.
+#'   Set `target_res` explicitly to pin the grid in scripted runs.
 #' @param dgt_coord Integer. Decimal places used to render coordinate keys.
 #'   Default 2.
 #' @param dgt_conc Integer. Decimal places used to render exposure keys.
@@ -311,8 +291,8 @@
 #'   inside 32 GB. It applies to the central estimate and to the
 #'   `uncertain`/`conc_uncert` chains alike.
 #' @param cr_config Optional configuration from [cr_config()], or a path to a
-#'   JSON config, used when `CRF` is a model name. `NULL` (default) uses the
-#'   shipped configuration. Ignored for a data.frame `CRF`.
+#'   JSON config, used when `crf` is a model name. `NULL` (default) uses the
+#'   shipped configuration. Ignored for a data.frame `crf`.
 #'
 #' @section Uncertainty:
 #' The interval is a **range**, not a sampling interval. The same low/high
@@ -332,13 +312,14 @@
 #'   `uncertain = TRUE` two extra columns, `CI_LOW` and `CI_UP`, hold the
 #'   range for each row total.
 #'
-#' @seealso [build_grid_info()], [domain_summary()],
-#'   [Decomposition()], [aggregate_mortality()]
+#' @seealso [build_grid_info()],
+#'   [decompose()], [aggregate_mortality()]
 #'
 #' @export
 #'
 #' @examples
 #' \dontrun{
+#' Reads the shipped example workbooks and runs the whole pipeline.
 #' extdata <- system.file("extdata", package = "AttrMort")
 #' grid_info <- readxl::read_excel(file.path(extdata, "grid_info.xlsx"))
 #' grid_exposure <- readxl::read_excel(file.path(extdata, "grid_exposure.xlsx"))
@@ -347,15 +328,15 @@
 #' national_mort  <- readxl::read_excel(file.path(extdata, "national_mortality.xlsx"))
 #'
 #' # Wide tables: extract one scenario by name
-#' Mortality(
-#'   CRF = "GEMM", calc_fild = grid_info, scenario = "base2015",
+#' mortality(
+#'   crf = "GEMM", calc_fild = grid_info, scenario = "base2015",
 #'   conc_real = grid_exposure, pop_total = grid_pop,
 #'   age_struc = national_age, mort_rate = national_mort, mort_lvl = "location"
 #' )
 #'
 #' # File paths, one call
-#' Mortality(
-#'   CRF = "GEMM", scenario = "base2015",
+#' mortality(
+#'   crf = "GEMM", scenario = "base2015",
 #'   calc_fild = file.path(extdata, "grid_info.xlsx"),
 #'   conc_real = "exposure.tif", pop_total = "population.tif",
 #'   age_struc = file.path(extdata, "national_age_structure.xlsx"),
@@ -363,9 +344,9 @@
 #'   mort_lvl  = "location", admin = "boundaries.shp", admin_col = "NAME"
 #' )
 #' }
-Mortality <- function(
-    CRF,
-    CI           = "MEAN",
+mortality <- function(
+    crf,
+    ci           = "MEAN",
     calc_fild    = NULL,
     conc_real,
     conc_cf      = NULL,
@@ -389,163 +370,37 @@ Mortality <- function(
 ) {
   validate     <- match.arg(validate)
   aggregate_by <- match.arg(aggregate_by, c("total", "endpoint", "age", "all"))
-  CI           <- .match_ci(CI)
+  ci           <- .match_ci(ci)
 
-  # The C-R metadata (lookup, endpoints, ages) comes from the config when CRF
-  # names a model; a data.frame CRF carries everything itself.
-  config   <- if (is.character(CRF)) .as_cr_config(cr_config) else NULL
-  crf_name <- if (is.character(CRF)) .match_cr_model(CRF, config) else
-    NA_character_
+  # Arguments first: a typo fails here, not after a long ingest.
+  .check_mortality_args(aggregate, uncertain, conc_uncert, chunk_ages)
 
-  if (!is.null(aggregate) && !isTRUE(aggregate) && !is.character(aggregate)) {
-    stop("`aggregate` must be NULL, TRUE, or a character vector of columns.",
-         call. = FALSE)
-  }
-  if (!is.logical(uncertain) || length(uncertain) != 1 || is.na(uncertain)) {
-    stop("`uncertain` must be TRUE or FALSE.", call. = FALSE)
-  }
-  if (!is.numeric(conc_uncert) || length(conc_uncert) != 1 ||
-      is.na(conc_uncert) || conc_uncert < 0) {
-    stop("`conc_uncert` is a percentage and must be a single non-negative ",
-         "number.", call. = FALSE)
-  }
-  if (!is.null(chunk_ages) &&
-      (!is.numeric(chunk_ages) || length(chunk_ages) != 1 ||
-         is.na(chunk_ages) || chunk_ages < 1)) {
-    stop("`chunk_ages` must be NULL or a single positive number of age ",
-         "strata per pass.", call. = FALSE)
-  }
-
-  # A concentration raster already carries the analysis grid, so it can stand
-  # in for `calc_fild` and, when domain calibration is asked for without
-  # boundaries, for `admin` as well. Both are read off the input types: there
-  # is no switch for them.
-  conc_raster <- .is_raster_input(conc_real)
-  pop_raster  <- .is_raster_input(pop_total)
-  # Only a skeleton the user supplied can be stale; the one taken from a
-  # raster `conc_real` below is the grid by construction.
-  own_skeleton <- !is.null(calc_fild)
-
-  .check_input_files(
-    calc_fild = calc_fild, conc_real = conc_real, conc_cf = conc_cf,
-    pop_total = pop_total, age_struc = age_struc, mort_rate = mort_rate,
-    admin     = admin
-  )
-
-  # ── spatial alignment of raster inputs ─────────────────────────────
-  spatial   <- .align_raster_inputs(conc_real, pop_total, conc_cf, scenario,
-                                    target_res, dgt_coord)
-  conc_real <- spatial$conc_real
-  pop_total <- spatial$pop_total
-  conc_cf   <- spatial$conc_cf
-  template  <- spatial$template
-
-  # ── ingestion and column mapping ───────────────────────────────────
-  conc_real <- .ingest_and_map(conc_real, schema = "location",
-                               dgt_coord = dgt_coord, label = "conc_real")
-  if (is.null(calc_fild)) {
-    # Grid-native skeleton: the ingested exposure raster is one row per cell,
-    # so its coordinates are the attribution field.
-    if (!conc_raster) {
-      stop(
-        "`calc_fild = NULL` is only supported when `conc_real` is a raster ",
-        "(a file path or a SpatRaster), because the analysis grid is then ",
-        "taken from the exposure data. Tabular `conc_real` needs an explicit ",
-        "`calc_fild` supplying the grid coordinates and/or the domains.",
-        call. = FALSE
-      )
-    }
-    calc_fild <- conc_real[, c("x", "y")] |> distinct()
+  # ── every input, prepared once ─────────────────────────────────────
+  # ── every input, prepared once (see R/prepare-inputs.R) ────────────
+  # `validate = "off"` means the run says nothing at all: it is not "less
+  # checking" but "no reporting", so the whole preparation -- resolution,
+  # column mapping, boundaries, the `calc_fild = NULL` note -- runs under a
+  # silence guard. `mortality()` is an entry point, so this is where the
+  # decision belongs; the stages below stay unaware of it.
+  quiet     <- validate == "off"
+  prep_args <- list(crf, calc_fild, conc_real, conc_cf, pop_total, age_struc,
+                    mort_rate, scenario, admin, admin_col, target_res,
+                    dgt_coord, dgt_conc, validate, cr_config, mort_lvl)
+  prep      <- if (quiet) {
+    suppressWarnings(suppressMessages(do.call(.prepare_inputs, prep_args)))
   } else {
-    calc_fild <- .ingest_and_map(calc_fild, schema = "location",
-                                 dgt_coord = dgt_coord, label = "calc_fild")
+    do.call(.prepare_inputs, prep_args)
   }
-  pop_total <- .ingest_and_map(pop_total, schema = "location",
-                               dgt_coord = dgt_coord, label = "pop_total")
-  age_struc <- .ingest_and_map(age_struc, schema = c("age", "prop", "location"),
-                               dgt_coord = dgt_coord, label = "age_struc")
-  mort_rate <- .ingest_and_map(mort_rate,
-                               schema = c("age", "cause", "mortrate", "location"),
-                               dgt_coord = dgt_coord, label = "mort_rate")
-  if (!is.null(conc_cf)) {
-    conc_cf <- .ingest_and_map(conc_cf, schema = "location",
-                               dgt_coord = dgt_coord, label = "conc_cf")
-  }
-
-  # ── grid consistency of a supplied skeleton ────────────────────────
-  # The rasters define the grid and `calc_fild` is joined onto them by
-  # coordinate key, so a skeleton from another grid -- a `build_grid_info()`
-  # table reused across resolutions, say -- would silently restrict the
-  # analysis to whatever happens to overlap. No key in common means the two
-  # grids are different and the call stops; a partial overlap is reported as a
-  # warning, because a deliberately coarser table is legal. `validate = "off"`
-  # turns both off with the rest of the validation.
-  if (validate != "off" && own_skeleton && (conc_raster || pop_raster)) {
-    .check_grid_match(
-      calc_fild,
-      list(if (conc_raster) conc_real, if (pop_raster) pop_total),
-      res = if (is.null(template)) NA_real_ else mean(terra::res(template))
-    )
-  }
-
-  # ── administrative boundaries ──────────────────────────────────────
-  # A raster run that names a `mort_lvl` of `mort_rate` but carries no such
-  # column in `calc_fild` wants domain calibration without boundaries:
-  # default to national boundaries. `admin =` always wins; tabular runs are
-  # untouched, so `admin = NULL` still means "no domain column" there.
-  national_admin <- FALSE
-  if (is.null(admin) && conc_raster && !is.null(mort_lvl) &&
-      mort_lvl %in% names(mort_rate) && !mort_lvl %in% names(calc_fild)) {
-    if (!requireNamespace("rnaturalearth", quietly = TRUE)) {
-      stop(
-        "The raster-only path defaults to national boundaries, which needs ",
-        "the `rnaturalearth` package (a Suggests dependency). Install it with ",
-        "install.packages(\"rnaturalearth\"), or pass `admin =` (a shapefile ",
-        "path or an sf object) to supply boundaries yourself.",
-        call. = FALSE
-      )
-    }
-    message("`admin = NULL`: rasterizing national boundaries ",
-            "(rnaturalearth, scale = 110) onto the analysis grid for ",
-            "`mort_lvl = \"", mort_lvl, "\"`. Pass `admin =` to override the ",
-            "administrative level.")
-    admin          <- rnaturalearth::ne_countries(scale = 110,
-                                                  returnclass = "sf")
-    national_admin <- TRUE
-  }
-
-  calc_fild <- .attach_admin(calc_fild, admin, admin_col, mort_lvl, mort_rate,
-                             template = template, target_res = target_res,
-                             dgt_coord = dgt_coord)
-
-  if (national_admin) {
-    # Country names are the usual failure mode: a name that does not match
-    # `mort_rate[[mort_lvl]]` silently drops that domain, so report the count.
-    matched <- length(intersect(unique(calc_fild[[mort_lvl]]),
-                                unique(mort_rate[[mort_lvl]])))
-    domains <- length(unique(mort_rate[[mort_lvl]]))
-    message("National boundaries: ", matched, " of ", domains, " `", mort_lvl,
-            "` value(s) of `mort_rate` matched the rasterized grid.",
-            if (matched < domains) {
-              paste0(" Country names have to match `", mort_lvl, "` exactly; ",
-                     "pass `admin =` with `admin_col =` for your own naming.")
-            } else {
-              ""
-            })
-  }
-
-  # ── scenario extraction from wide inputs ───────────────────────────
-  extracted <- .extract_scenario(conc_real, pop_total, age_struc, mort_rate,
-                                 conc_cf, scenario, dgt_conc)
-  conc_real <- extracted$conc_real
-  pop_total <- extracted$pop_total
-  age_struc <- extracted$age_struc
-  mort_rate <- extracted$mort_rate
-  conc_cf   <- extracted$conc_cf
-
-  if (is.null(conc_cf)) {
-    conc_cf <- conc_real
-  }
+  calc_fild <- prep$calc_fild
+  conc_real <- prep$conc_real
+  conc_cf   <- prep$conc_cf
+  pop_total <- prep$pop_total
+  age_struc <- prep$age_struc
+  mort_rate <- prep$mort_rate
+  template  <- prep$template
+  config    <- prep$config
+  crf_name  <- prep$crf_name
+  mort_lvl  <- prep$mort_lvl
 
   # ── data validation ────────────────────────────────────────────────
   if (validate != "off") {
@@ -557,8 +412,8 @@ Mortality <- function(
       config   = config
     )
     if (!report$valid && validate == "stop") {
-      stop("Input validation failed:\n  - ",
-           paste(report$issues, collapse = "\n  - "), call. = FALSE)
+      issues_txt <- paste(report$issues, collapse = "\n  - ")
+      .abort("Input validation failed:\n  - {issues_txt}")
     }
   }
 
@@ -571,100 +426,150 @@ Mortality <- function(
 
   # ── the grain this call resolved to ────────────────────────────────
   # Report it before anything is computed, and exactly once per run: the
-  # message belongs to Mortality(), not to the age-chunked kernel, which is
+  # message belongs to mortality(), not to the age-chunked kernel, which is
   # entered several times for one run.
   if (validate != "off") {
-    message(.grain_message(calc_fild, mort_lvl, mort_rate,
-                           res = .grain_res(calc_fild, template)))
+    cli::cli_inform(.grain_message(calc_fild, mort_lvl, mort_rate,
+                                   res = .grain_res(calc_fild, template)))
   }
 
   # ── central estimate, plus the range when requested ────────────────
   # Every branch -- central, CRF range and the conc_uncert chain -- goes
   # through the same age-chunked helper, so `chunk_ages` cannot change one of
-  # them without the others.
-  compute <- function(ci, conc_r = conc_real, conc_c = conc_cf) {
+  # them without the others. The branch notice belongs to the run, not to one
+  # pass: only the first `compute()` reports it, so the uncertainty chains
+  # stay quiet.
+  compute <- function(ci, conc_r = conc_real, conc_c = conc_cf,
+                      notify = FALSE) {
     .calc_attributable_ages(calc_fild, conc_r, conc_c, pop_total, age_struc,
-                            mort_rate, mort_lvl, CRF, ci, chunk_ages,
-                            config = config, dgt_conc = dgt_conc)
+                            mort_rate, mort_lvl, crf, ci, chunk_ages,
+                            config = config, dgt_conc = dgt_conc,
+                            notify = notify)
   }
 
-  grid     <- compute(CI)
+  grid     <- compute(ci, notify = !quiet)
   key_cols <- intersect(names(calc_fild), names(grid))
-
-  lower_frames <- upper_frames <- NULL
-  if (uncertain) {
-    lower_frames <- list(.total_frame(compute("LOW"), key_cols))
-    upper_frames <- list(.total_frame(compute("UP"), key_cols))
-
-    if (conc_uncert > 0) {
-      for (side in c("low", "up")) {
-        factor <- if (side == "low") {
-          1 - conc_uncert / 100
-        } else {
-          1 + conc_uncert / 100
-        }
-        shifted <- .total_frame(
-          compute(CI,
-                  .scale_conc(conc_real, factor, dgt_conc),
-                  .scale_conc(conc_cf, factor, dgt_conc)),
-          key_cols
-        )
-        if (side == "low") {
-          lower_frames <- c(lower_frames, list(shifted))
-        } else {
-          upper_frames <- c(upper_frames, list(shifted))
-        }
-      }
-    }
+  ranges   <- if (uncertain) {
+    .uncertainty_frames(compute, key_cols, ci, conc_real, conc_cf,
+                        conc_uncert, dgt_conc)
   }
 
   # ── optional domain aggregation ────────────────────────────────────
   if (!is.null(aggregate)) {
-    at <- if (isTRUE(aggregate)) {
-      if (is.null(mort_lvl)) {
-        message("`aggregate = TRUE` with `mort_lvl = NULL`: the whole field ",
-                "is aggregated into a single row.")
-        character(0)
-      } else {
-        mort_lvl
-      }
-    } else {
-      aggregate
-    }
-
-    missing_cols <- setdiff(at, names(grid))
-    if (length(missing_cols) > 0) {
-      stop("`aggregate` column(s) not found in the result: ",
-           paste(missing_cols, collapse = ", "), ".", call. = FALSE)
-    }
-
-    out <- if (length(at) == 0) {
-      data.frame(total = sum(.row_total(grid, key_cols)))
-    } else {
-      aggregate_mortality(grid, calc_fild = calc_fild, at = at,
-                          by = aggregate_by)
-    }
-
-    pwe <- .domain_pwe(calc_fild, conc_real, pop_total, at)
-    out <- if (length(at) == 0) {
-      cbind(out, pwe)
-    } else {
-      left_join(out, pwe, by = at)
-    }
-
-    if (uncertain) {
-      out <- .attach_range(out, lower_frames, upper_frames, at)
-    }
-    return(out)
+    at <- .aggregate_keys(aggregate, mort_lvl)
+    return(.aggregate_result(grid, calc_fild, conc_real, pop_total, at,
+                             aggregate_by, key_cols, ranges))
   }
 
   if (uncertain) {
-    grid$CI_LOW <- .range_sum(lower_frames, key_cols, "low",
-                              aggregate = FALSE)
-    grid$CI_UP  <- .range_sum(upper_frames, key_cols, "up",
-                              aggregate = FALSE)
+    # `grid` is the key space every chain is expected to cover; aligning to it
+    # is what keeps a chain that lost a cell from shifting the others.
+    keys_frame  <- grid[key_cols]
+    grid$CI_LOW <- .range_sum(ranges$lower, key_cols, "low",
+                              aggregate = FALSE, keys_frame = keys_frame)
+    grid$CI_UP  <- .range_sum(ranges$upper, key_cols, "up",
+                              aggregate = FALSE, keys_frame = keys_frame)
   }
   grid
+}
+
+# ── Stages of mortality(), each one call in the orchestrator ────────────
+
+# ── the stage both entry points share ───────────────────────────────────
+
+
+# Argument checks that need no data. They all run before anything is read, so a
+# typo fails on the spot rather than after a long ingest.
+.check_mortality_args <- function(aggregate, uncertain, conc_uncert, chunk_ages) {
+  if (!is.null(aggregate) && !isTRUE(aggregate) && !is.character(aggregate)) {
+    .abort("`aggregate` must be NULL, TRUE, or a character vector of columns.")
+  }
+  if (!is.logical(uncertain) || length(uncertain) != 1 || is.na(uncertain)) {
+    .abort("`uncertain` must be TRUE or FALSE.")
+  }
+  if (!is.numeric(conc_uncert) || length(conc_uncert) != 1 ||
+      is.na(conc_uncert) || conc_uncert < 0) {
+    .abort(str_c("`conc_uncert` is a percentage and must be a single ",
+                 "non-negative number."))
+  }
+  if (!is.null(chunk_ages) &&
+      (!is.numeric(chunk_ages) || length(chunk_ages) != 1 ||
+         is.na(chunk_ages) || chunk_ages < 1)) {
+    .abort(str_c("`chunk_ages` must be NULL or a single positive ",
+                 "number of age strata per pass."))
+  }
+  invisible(NULL)
+}
+
+
+
+
+# The low and high sides of the reported range: the CR table quantiles, plus --
+# when exposure uncertainty was asked for -- a second chain with every
+# concentration scaled. `.range_sum()` reduces each side with pmin/pmax, so the
+# range is the union of the two perturbations rather than their product.
+.uncertainty_frames <- function(compute, key_cols, ci, conc_real, conc_cf,
+                                conc_uncert, dgt_conc) {
+  lower <- list(.total_frame(compute("LOW"), key_cols))
+  upper <- list(.total_frame(compute("UP"), key_cols))
+  if (conc_uncert <= 0) {
+    return(list(lower = lower, upper = upper))
+  }
+  factors <- c(1 - conc_uncert / 100, 1 + conc_uncert / 100)
+  shifted <- map(factors, function(factor) {
+    .total_frame(
+      compute(ci, .scale_conc(conc_real, factor, dgt_conc),
+              .scale_conc(conc_cf, factor, dgt_conc)),
+      key_cols
+    )
+  })
+  list(lower = c(lower, shifted[1]), upper = c(upper, shifted[2]))
+}
+
+# Which columns the aggregate is grouped by: the calibration domains, or the
+# whole field when the run is uncalibrated (`TRUE` with `mort_lvl = NULL`).
+.aggregate_keys <- function(aggregate, mort_lvl) {
+  if (!isTRUE(aggregate)) {
+    return(aggregate)
+  }
+  if (!is.null(mort_lvl)) {
+    return(mort_lvl)
+  }
+  cli::cli_inform(str_c(
+    "`aggregate = TRUE` with `mort_lvl = NULL`: the whole field ",
+    "is aggregated into a single row."
+  ))
+  character(0)
+}
+
+# The `aggregate = ` path: one row per group, that group's population-weighted
+# exposure, and the range when one was asked for.
+.aggregate_result <- function(grid, calc_fild, conc_real, pop_total, at,
+                              aggregate_by, key_cols, ranges) {
+  missing_cols <- setdiff(at, names(grid))
+  if (length(missing_cols) > 0) {
+    missing_txt <- paste(missing_cols, collapse = ", ")
+    .abort("`aggregate` column(s) not found in the result: {missing_txt}.")
+  }
+
+  out <- if (length(at) == 0) {
+    tibble(total = sum(.row_total(grid, key_cols)))
+  } else {
+    aggregate_mortality(grid, calc_fild = calc_fild, at = at,
+                        by = aggregate_by)
+  }
+
+  pwe <- .domain_pwe(calc_fild, conc_real, pop_total, at)
+  out <- if (length(at) == 0) {
+    bind_cols(out, pwe)
+  } else {
+    left_join(out, pwe, by = at)
+  }
+
+  if (is.null(ranges)) {
+    return(out)
+  }
+  .attach_range(out, ranges$lower, ranges$upper, at)
 }
 
 # ── age chunking ────────────────────────────────────────────────────────
@@ -678,19 +583,33 @@ Mortality <- function(
 # (6.5e6 cells x 15 ages) out of reach of 32 GB.
 
 # Which branch .calc_attributable() takes on `mort_lvl`, expressed as the
-# warning that goes with it (or NULL when there is nothing to warn about).
-# Split out so that the age-chunked path can warn once instead of once per
-# age block.
-.mort_lvl_warning <- function(mort_lvl, mort_rate) {
+# notice that goes with it (or NULL when there is nothing to say). The two
+# branches are not equally surprising: `mort_lvl = NULL` is a documented mode
+# -- the grid-level PAF, deliberately uncalibrated -- so it is only reported,
+# while a `mort_lvl` that is not a column of `mort_rate` falls back to one
+# field-wide calibration unit, which is worth a warning. Split out so that the
+# age-chunked path and the uncertainty chains notify once per run rather than
+# once per pass.
+.mort_lvl_notice <- function(mort_lvl, mort_rate) {
   if (is.null(mort_lvl)) {
-    return(paste0("The `mort_lvl` is set NULL, calculation will ignore ",
-                  "calibration of mort_rate."))
+    return(list(
+      kind = "info",
+      text = paste0(
+        "`mort_lvl` is NULL: the grid-level result is not calibrated ",
+        "against `mort_rate`."
+      )
+    ))
   }
   if (mort_lvl %in% names(mort_rate)) {
     return(NULL)
   }
-  paste0("The `mort_lvl` is not a domain column of `mort_rate` dataset, ",
-         "calculation will regard the field as one.")
+  list(
+    kind = "warn",
+    text = paste0(
+      "`mort_lvl` is not a column of `mort_rate`: the whole field is treated ",
+      "as one calibration unit."
+    )
+  )
 }
 
 # The age strata that can contribute anything: those present in both
@@ -706,7 +625,7 @@ Mortality <- function(
 # Split `ages` into consecutive groups of at most `size` strata.
 .split_ages <- function(ages, size) {
   starts <- seq.int(1L, length(ages), by = size)
-  lapply(starts, function(s) ages[s:min(s + size - 1L, length(ages))])
+  map(starts, function(s) ages[s:min(s + size - 1L, length(ages))])
 }
 
 # The `{endpoint}_{age}` value columns of `nm` whose age stratum is in `ages`,
@@ -772,28 +691,29 @@ Mortality <- function(
 # there), and it has to come back as NA rather than disappear, so the blocks
 # are joined on the grid keys -- never cbind()ed.
 .calc_attributable_ages <- function(calc_fild, conc_real, conc_cf, pop_total,
-                                    age_struc, mort_rate, mort_lvl, CRF, CI,
+                                    age_struc, mort_rate, mort_lvl, crf, ci,
                                     chunk_ages = NULL, config = NULL,
-                                    dgt_conc = 1) {
+                                    dgt_conc = 1, notify = FALSE) {
   # Resolve the model and build its RR table once: every age block below runs
   # the same lookup, so rebuilding it per block is pure repeated work.
-  crf_label <- if (is.data.frame(CRF)) {
+  crf_label <- if (is.data.frame(crf)) {
     "user-supplied"
   } else {
-    .match_cr_model(CRF, config)
+    .match_cr_model(crf, config)
   }
-  RR_tbl <- if (is.data.frame(CRF)) {
-    CRF
+  RR_tbl <- if (is.data.frame(crf)) {
+    crf
   } else {
-    RR_std(crf_label, CI, dgt = dgt_conc, config = config)
+    rr_std(crf_label, ci, dgt = dgt_conc, config = config)
   }
   ages   <- .chunkable_ages(mort_rate, RR_tbl)
 
   if (length(ages) == 0) {
     # No shared age stratum: leave the report to .calc_attributable().
     return(.calc_attributable(calc_fild, conc_real, conc_cf, pop_total,
-                              age_struc, mort_rate, mort_lvl, CRF, CI,
-                              config = config, dgt_conc = dgt_conc,
+                              age_struc, mort_rate, mort_lvl, crf, ci,
+                              warn = notify, config = config,
+                              dgt_conc = dgt_conc,
                               RR_tbl = RR_tbl, crf_label = crf_label))
   }
 
@@ -801,18 +721,36 @@ Mortality <- function(
                                 length(unique(RR_tbl$endpoint)))
   blocks <- .split_ages(ages, size)
 
-  # The branch warning is a property of the whole run, so only the first
-  # block emits it; the blocks themselves are independent computations.
-  parts <- lapply(seq_along(blocks), function(i) {
+  # The branch notice is a property of the whole run, so only the first
+  # block emits it; the blocks themselves are independent computations. An
+  # empty block is allowed here and dropped below: a GBD age structure can
+  # lack a stratum that the CRF and `mort_rate` both carry, and the
+  # unchunked result simply has no column for it.
+  parts <- map(seq_along(blocks), function(i) {
     block <- blocks[[i]]
     .calc_attributable(
       calc_fild, conc_real, conc_cf, pop_total,
       age_struc |> filter(.standardize_age_key(age) %in% block),
       mort_rate |> filter(.standardize_age_key(age) %in% block),
-      mort_lvl, CRF, CI, warn = i == 1L, config = config,
-      dgt_conc = dgt_conc, RR_tbl = RR_tbl, crf_label = crf_label
+      mort_lvl, crf, ci, warn = notify && i == 1L, config = config,
+      dgt_conc = dgt_conc, RR_tbl = RR_tbl, crf_label = crf_label,
+      allow_empty = TRUE
     )
   })
+
+  empty <- map_lgl(parts, function(part) nrow(part) == 0L)
+  if (all(empty)) {
+    # No block contributed a row. Fall through to the unchunked check so the
+    # run reports the problem exactly as a single pass would, rather than
+    # blaming the age chunking.
+    return(.calc_attributable(
+      calc_fild, conc_real, conc_cf, pop_total, age_struc, mort_rate,
+      mort_lvl, crf, ci, warn = FALSE, config = config, dgt_conc = dgt_conc,
+      RR_tbl = RR_tbl, crf_label = crf_label
+    ))
+  }
+  parts  <- parts[!empty]
+  blocks <- blocks[!empty]
 
   if (length(parts) == 1L) {
     return(parts[[1L]])
@@ -830,7 +768,7 @@ Mortality <- function(
   # rather than from `mort_rate`), so each block is cut back to the ages it
   # was given before the blocks are joined. That is also what keeps the value
   # columns of the blocks disjoint, so the join appends rather than renames.
-  parts <- lapply(seq_along(blocks), function(i) {
+  parts <- map(seq_along(blocks), function(i) {
     keep <- .age_value_columns(names(parts[[i]]), blocks[[i]])
     select(parts[[i]],
            all_of(unique(c(keys, if (i == 1L) extra, keep))))
@@ -843,140 +781,237 @@ Mortality <- function(
 # Core computation. Pure data-frame in / data-frame out: no file access, no
 # raster handling, no column-name guessing. `warn` is FALSE only for the age
 # blocks of .calc_attributable_ages(), which reports the branch warning once
-# for the whole run.
-.calc_attributable <- function(calc_fild, conc_real, conc_cf, pop_total,
-                               age_struc, mort_rate, mort_lvl, CRF, CI,
-                               warn = TRUE, config = NULL, dgt_conc = 1,
-                               RR_tbl = NULL, crf_label = NULL) {
-  # RR_tbl/crf_label come precomputed from .calc_attributable_ages() so that a
-  # chunked run does not rebuild the same lookup once per age block; the
-  # defaults keep direct calls self-contained.
+# for the whole run. `allow_empty` makes an empty join return the (0-row, key
+# carrying) table instead of aborting; the age-chunked caller uses it to drop
+# blocks that cannot contribute, and still aborts when every block is empty.
+# Deaths per 100,000: mortality rates are published in those units, while an
+# attributable burden is a number of deaths.
+.PER_100K <- 1e5
+
+# One row per cell (or domain), one column per `{endpoint}_{age}` stratum: the
+# shape every branch of the calculation returns.
+.widen_mort <- function(x) {
+  pivot_wider(
+    x,
+    names_from  = c("endpoint", "age"),
+    names_sep   = "_",
+    values_from = "attr_mort"
+  )
+}
+
+# The CR table and its label. `.calc_attributable_ages()` passes both down so a
+# chunked run does not rebuild the same lookup per age block; the defaults keep
+# the kernel usable on its own.
+.resolve_crf_tables <- function(crf, ci, config, dgt_conc, RR_tbl, crf_label) {
   if (is.null(crf_label)) {
-    crf_label <- if (is.character(CRF)) {
-      .match_cr_model(CRF, config)
+    crf_label <- if (is.character(crf)) {
+      .match_cr_model(crf, config)
     } else {
       "user-supplied"
     }
   }
   if (is.null(RR_tbl)) {
-    RR_tbl <- if (is.data.frame(CRF)) {
-      CRF
+    RR_tbl <- if (is.data.frame(crf)) {
+      crf
     } else {
-      RR_std(crf_label, CI, dgt = dgt_conc, config = config)
+      rr_std(crf_label, ci, dgt = dgt_conc, config = config)
     }
   }
+  list(RR_tbl = RR_tbl, crf_label = crf_label)
+}
 
-  # Out-of-range exposures simply never join the lookup key. Say how many
-  # values that affects instead of letting them disappear in na.omit().
-  if (warn && nrow(RR_tbl) > 0) {
-    rng <- range(as.numeric(RR_tbl$conc), na.rm = TRUE)
-    checked <- NULL
-    for (nm in c("conc_real", "conc_cf")) {
-      df <- if (identical(nm, "conc_real")) conc_real else conc_cf
-      if (!is.data.frame(df) || !"conc" %in% names(df)) next
-      v <- suppressWarnings(as.numeric(df$conc))
-      if (!is.null(checked) && identical(v, checked)) next
-      checked <- v
-      n_out <- sum(!is.na(v) & (v < rng[1] | v > rng[2]))
-      if (n_out > 0) {
-        warning(
-          n_out, " value(s) in `", nm, "` fall outside the CRF lookup range [",
-          format(rng[1]), ", ", format(rng[2]),
-          "] and are dropped by the join; they contribute nothing to the result.",
-          call. = FALSE
-        )
-      }
+# Out-of-range exposures simply never join the lookup key. Say how many values
+# that affects instead of letting them disappear in drop_na(); `conc_real` and
+# `conc_cf` are often the same table, so identical axes are reported once.
+.warn_conc_out_of_range <- function(RR_tbl, conc_real, conc_cf) {
+  if (nrow(RR_tbl) == 0) {
+    return(invisible(NULL))
+  }
+  rng <- range(as.numeric(RR_tbl$conc), na.rm = TRUE)
+  checked <- NULL
+  for (nm in c("conc_real", "conc_cf")) {
+    conc_tbl <- if (identical(nm, "conc_real")) conc_real else conc_cf
+    if (!is.data.frame(conc_tbl) || !"conc" %in% names(conc_tbl)) {
+      next
+    }
+    v <- suppressWarnings(as.numeric(conc_tbl$conc))
+    if (!is.null(checked) && identical(v, checked)) {
+      next
+    }
+    checked <- v
+    n_out <- sum(!is.na(v) & (v < rng[1] | v > rng[2]))
+    if (n_out > 0) {
+      cli::cli_warn(str_c(
+        n_out, " value(s) in `", nm, "` fall outside the CRF lookup range [",
+        format(rng[1]), ", ", format(rng[2]),
+        "] and are dropped by the join; they contribute nothing to the result."
+      ))
     }
   }
+  invisible(NULL)
+}
 
-  # Canonicalise the join keys of the tabular inputs.
-  mort_rate <- mort_rate |>
-    mutate(endpoint = tolower(as.character(endpoint)),
-           age      = .standardize_age_key(age))
-  age_struc <- age_struc |>
-    mutate(age = .standardize_age_key(age))
+# Endpoints and ages are joined as characters, so the user's tables have to
+# speak the lookup tables' spellings.
+.standardize_join_keys <- function(mort_rate, age_struc) {
+  list(
+    mort_rate = mort_rate |>
+      mutate(endpoint = tolower(as.character(endpoint)),
+             age      = .standardize_age_key(age)),
+    age_struc = age_struc |>
+      mutate(age = .standardize_age_key(age))
+  )
+}
 
-  # A CRF whose endpoints are absent from mort_rate can only produce an empty
-  # result: say so instead of returning zero rows.
+# A CRF whose endpoints are absent from `mort_rate` can only produce an empty
+# result: say so instead of returning zero rows.
+.check_endpoint_overlap <- function(RR_tbl, mort_rate, crf_label) {
   ep_rr   <- unique(RR_tbl$endpoint)
   ep_mort <- unique(mort_rate$endpoint)
-  if (length(intersect(ep_rr, ep_mort)) == 0) {
-    stop(
-      "No shared disease endpoint between CRF \"", crf_label,
-      "\" and `mort_rate`.\n",
-      "  CRF endpoints   : ", paste(sort(ep_rr), collapse = ", "), "\n",
-      "  mort_rate values: ", paste(head(sort(ep_mort), 20), collapse = ", "),
-      call. = FALSE
-    )
+  if (length(intersect(ep_rr, ep_mort)) > 0) {
+    return(invisible(NULL))
   }
+  # Everything that comes from the data is interpolated as a value, never
+  # concatenated into the template: cli evaluates whatever sits between braces
+  # in a message, so an endpoint literally called `{1+1}` would be executed.
+  label_txt   <- crf_label
+  ep_rr_txt   <- paste(sort(ep_rr), collapse = ", ")
+  ep_mort_txt <- paste(head(sort(ep_mort), 20), collapse = ", ")
+  .abort(paste0(
+    "No shared disease endpoint between CRF \"{label_txt}\" and `mort_rate`.\n",
+    "  CRF endpoints   : {ep_rr_txt}\n",
+    "  mort_rate values: {ep_mort_txt}"
+  ))
+}
 
-  branch_msg <- .mort_lvl_warning(mort_lvl, mort_rate)
-  if (warn && !is.null(branch_msg)) {
-    warning(branch_msg, call. = FALSE)
+# The one-unit fallback is reached only when `mort_rate` carries no domain at
+# all (`.resolve_mort_lvl()` reports that). Its risk term is the population
+# weighted mean RR of the field rather than the counterfactual exposure, which
+# is what `mortality()` reports when `mort_lvl` names a column neither table
+# has: the exposure data is not there to be attributed cell by cell.
+#
+# Which branch the run took is a property of the run, not a fault: say it once,
+# and as a warning only when it is actually surprising (`.mort_lvl_notice()`).
+.notify_mort_lvl <- function(mort_lvl, mort_rate) {
+  branch_msg <- .mort_lvl_notice(mort_lvl, mort_rate)
+  if (is.null(branch_msg)) {
+    return(invisible(NULL))
   }
-
-  if (is.null(mort_lvl)) {
-    out <- list(calc_fild, conc_real, RR_tbl, age_struc, mort_rate, pop_total) |>
-      reduce(left_join) |>
-      mutate(M = pop * prop * mortrate, .keep = "unused") |>
-      mutate(AttrMort = M * (RR - 1) / RR / 1e5, .keep = "unused") |>
-      pivot_wider(
-        names_from  = c("endpoint", "age"),
-        names_sep   = "_",
-        values_from = "AttrMort"
-      )
-  } else if (mort_lvl %in% names(mort_rate)) {
-    PWRR <- list(calc_fild, conc_real, pop_total, RR_tbl) |>
-      reduce(left_join) |>
-      na.omit() |>
-      group_by(pick(all_of(mort_lvl)), endpoint, age) |>
-      summarise(PWRR = weighted.mean(RR, pop, na.rm = TRUE)) |>
-      ungroup()
-
-    out <- list(calc_fild, conc_cf, pop_total, RR_tbl, mort_rate, age_struc,
-                PWRR) |>
-      reduce(left_join) |>
-      select(-conc) |>
-      na.omit() |>
-      mutate(M = pop * prop * mortrate, .keep = "unused") |>
-      mutate(AttrMort = M * (RR - 1) / PWRR / 1e5, .keep = "unused") |>
-      pivot_wider(
-        names_from  = c("endpoint", "age"),
-        names_sep   = "_",
-        values_from = "AttrMort"
-      )
+  if (identical(branch_msg$kind, "warn")) {
+    cli::cli_warn(branch_msg$text)
   } else {
-    PWRR <- list(calc_fild, conc_real, pop_total, RR_tbl) |>
-      reduce(left_join) |>
-      na.omit() |>
-      group_by(endpoint, age) |>
-      summarise(PWRR = weighted.mean(RR, pop, na.rm = TRUE)) |>
-      ungroup()
+    cli::cli_inform(branch_msg$text)
+  }
+  invisible(NULL)
+}
 
-    out <- list(calc_fild, pop_total, mort_rate, age_struc) |>
-      reduce(left_join) |>
-      group_by(endpoint, age) |>
-      summarise(M = sum(pop * prop * mortrate / 1e5, na.rm = TRUE)) |>
-      ungroup() |>
-      left_join(PWRR) |>
-      na.omit() |>
-      mutate(AttrMort = M * (1 - 1 / PWRR), .keep = "unused") |>
-      pivot_wider(
-        names_from  = c("endpoint", "age"),
-        names_sep   = "_",
-        values_from = "AttrMort"
-      )
+# PWRR per (domain, endpoint, age): the population-weighted mean relative risk
+# of the real exposure, which is what makes the domain the calibration unit.
+.pwrr_by_domain <- function(calc_fild, conc_real, pop_total, RR_tbl, mort_lvl) {
+  list(calc_fild, conc_real, pop_total, RR_tbl) |>
+    reduce(.left_join_common) |>
+    drop_na() |>
+    group_by(pick(all_of(mort_lvl)), endpoint, age) |>
+    summarise(PWRR = weighted.mean(RR, pop, na.rm = TRUE)) |>
+    ungroup()
+}
+
+# Branch 1 -- `mort_lvl = NULL`: the grid-level PAF, the risk term RR(conc_real)
+# applied cell by cell with no calibration.
+.attributable_grid <- function(calc_fild, conc_real, RR_tbl, age_struc,
+                               mort_rate, pop_total) {
+  list(calc_fild, conc_real, RR_tbl, age_struc, mort_rate, pop_total) |>
+    reduce(.left_join_common) |>
+    mutate(mort_base = pop * prop * mortrate, .keep = "unused") |>
+    mutate(attr_mort = mort_base * (RR - 1) / RR / .PER_100K, .keep = "unused") |>
+    .widen_mort()
+}
+
+# Branch 2 -- `mort_lvl` names a column of `mort_rate`: the domain is the
+# calibration unit, so the risk term uses the counterfactual exposure `conc_cf`
+# while the calibration uses the real one.
+.attributable_by_domain <- function(calc_fild, conc_real, conc_cf, pop_total,
+                                    RR_tbl, age_struc, mort_rate, mort_lvl) {
+  pwrr <- .pwrr_by_domain(calc_fild, conc_real, pop_total, RR_tbl, mort_lvl)
+
+  list(calc_fild, conc_cf, pop_total, RR_tbl, mort_rate, age_struc, pwrr) |>
+    reduce(.left_join_common) |>
+    select(-conc) |>
+    drop_na() |>
+    mutate(mort_base = pop * prop * mortrate, .keep = "unused") |>
+    mutate(attr_mort = mort_base * (RR - 1) / PWRR / .PER_100K, .keep = "unused") |>
+    .widen_mort()
+}
+
+# Branch 3 -- `mort_lvl` is not a column of `mort_rate`: the whole field is one
+# calibration unit, so the burden is aggregated to (endpoint, age) before the
+# ratio and the PWRR is field-wide.
+.attributable_one_field <- function(calc_fild, conc_real, pop_total, RR_tbl,
+                                    age_struc, mort_rate) {
+  pwrr <- list(calc_fild, conc_real, pop_total, RR_tbl) |>
+    reduce(.left_join_common) |>
+    drop_na() |>
+    group_by(endpoint, age) |>
+    summarise(PWRR = weighted.mean(RR, pop, na.rm = TRUE)) |>
+    ungroup()
+
+  list(calc_fild, pop_total, mort_rate, age_struc) |>
+    reduce(.left_join_common) |>
+    group_by(endpoint, age) |>
+    summarise(mort_base = sum(pop * prop * mortrate / .PER_100K,
+                              na.rm = TRUE)) |>
+    ungroup() |>
+    .left_join_common(pwrr) |>
+    drop_na() |>
+    mutate(attr_mort = mort_base * (1 - 1 / PWRR), .keep = "unused") |>
+    .widen_mort()
+}
+
+.calc_attributable <- function(calc_fild, conc_real, conc_cf, pop_total,
+                               age_struc, mort_rate, mort_lvl, crf, ci,
+                               warn = TRUE, config = NULL, dgt_conc = 1,
+                               RR_tbl = NULL, crf_label = NULL,
+                               allow_empty = FALSE) {
+  tables <- .resolve_crf_tables(crf, ci, config, dgt_conc, RR_tbl, crf_label)
+  RR_tbl     <- tables$RR_tbl
+  crf_label  <- tables$crf_label
+
+  if (warn) {
+    .warn_conc_out_of_range(RR_tbl, conc_real, conc_cf)
+  }
+
+  keys       <- .standardize_join_keys(mort_rate, age_struc)
+  mort_rate  <- keys$mort_rate
+  age_struc  <- keys$age_struc
+
+  .check_endpoint_overlap(RR_tbl, mort_rate, crf_label)
+  if (warn) {
+    .notify_mort_lvl(mort_lvl, mort_rate)
+  }
+
+  out <- if (is.null(mort_lvl)) {
+    .attributable_grid(calc_fild, conc_real, RR_tbl, age_struc, mort_rate,
+                       pop_total)
+  } else if (mort_lvl %in% names(mort_rate)) {
+    .attributable_by_domain(calc_fild, conc_real, conc_cf, pop_total, RR_tbl,
+                            age_struc, mort_rate, mort_lvl)
+  } else {
+    .attributable_one_field(calc_fild, conc_real, pop_total, RR_tbl,
+                            age_struc, mort_rate)
   }
 
   if (nrow(out) == 0) {
-    stop(
+    if (allow_empty) {
+      return(out)
+    }
+    # interpolated, not concatenated: see `.check_endpoint_overlap()`
+    age_txt <- paste(head(sort(unique(RR_tbl$age)), 5), collapse = ", ")
+    .abort(paste0(
       "No rows survived the join between the inputs and the ",
       "concentration-response table. Check that `mort_rate` covers the same ",
       "domains and age groups as `calc_fild`, and that `age` values match ",
-      "the CRF age strata (e.g. ", paste(head(sort(unique(RR_tbl$age)), 5),
-                                         collapse = ", "), ", ...).",
-      call. = FALSE
-    )
+      "the CRF age strata (e.g. {age_txt}, ...)."
+    ))
   }
 
   out

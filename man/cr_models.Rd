@@ -11,7 +11,7 @@ cr_models(config = NULL)
 to a config file. `NULL` (default) uses the shipped config.}
 }
 \value{
-Character vector of accepted `CRF`/`CR_Model` values, including
+Character vector of accepted `crf`/`cr_model` values, including
   aliases.
 }
 \description{

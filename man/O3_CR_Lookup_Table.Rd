@@ -3,16 +3,22 @@
 \docType{data}
 \name{O3_CR_Lookup_Table}
 \alias{O3_CR_Lookup_Table}
-\title{the C-R curves for O3 by Carey et al.}
+\title{O3 concentration-response lookup table}
 \format{
 A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
-  wide tibble: a character \code{conc} column rendered at one decimal place
-  plus one column per \code{endpoint_age} stratum.
+  wide data.frame: a character \code{conc} column rendered at one decimal
+  place plus one column per \code{endpoint_age} stratum.
+}
+\source{
+Carey et al. (2013), "mortality associations with long-term exposure
+  to outdoor air pollution in a national English cohort" (PMID 23590261), as
+  used by the Global Burden of Disease risk-factor analysis.
 }
 \usage{
 O3_CR_Lookup_Table
 }
 \description{
-the C-R curves for O3 by Carey et al.
+The ozone (O<sub>3</sub>) relative-risk curve of the Global Burden of Disease
+risk-factor analysis, attributed to Carey et al.
 }
 \keyword{datasets}

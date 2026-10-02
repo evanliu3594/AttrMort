@@ -1,7 +1,7 @@
 # Tests for the explicit analysis grid ------------------------------------
 #
-# `build_grid_info()` renders the grid a `Mortality()` run uses as a table, and
-# `Mortality()` checks a skeleton handed back to it against the rasters, so a
+# `build_grid_info()` renders the grid a `mortality()` run uses as a table, and
+# `mortality()` checks a skeleton handed back to it against the rasters, so a
 # table from another grid cannot be joined silently.
 #
 # Given  - the shipped example grid, its three fictional countries, and a
@@ -109,7 +109,7 @@
 .gi_raster_run <- function(tifs, calc_fild = NULL,
                            admin = .gi_example_boundaries()) {
   args <- list(
-    CRF = "GEMM", conc_real = tifs$conc, pop_total = tifs$pop,
+    crf = "GEMM", conc_real = tifs$conc, pop_total = tifs$pop,
     age_struc = .attr_data("national_age_structure"),
     mort_rate = .attr_data("national_mortality"),
     mort_lvl = "location", scenario = "base2015", validate = "off",
@@ -119,13 +119,13 @@
   if (!is.null(calc_fild)) {
     args$calc_fild <- calc_fild
   }
-  suppressWarnings(suppressMessages(do.call(Mortality, args)))
+  suppressWarnings(suppressMessages(do.call(mortality, args)))
 }
 
 # The same run on the shipped wide tables, with `calc_fild` as given.
 .gi_tabular_run <- function(calc_fild = .attr_data("grid_info")) {
-  suppressWarnings(suppressMessages(Mortality(
-    CRF = "GEMM", calc_fild = calc_fild,
+  suppressWarnings(suppressMessages(mortality(
+    crf = "GEMM", calc_fild = calc_fild,
     conc_real = .attr_data("grid_exposure"),
     pop_total = .attr_data("grid_pop"),
     age_struc = .attr_data("national_age_structure"),
@@ -135,7 +135,7 @@
   )))
 }
 
-describe("build_grid_info() feeding Mortality()", {
+describe("build_grid_info() feeding mortality()", {
   it("gives the same national totals as the tabular and raster-only routes", {
     tifs <- .gi_example_tifs(.gi_temp_dir())
 
@@ -172,6 +172,37 @@ describe("build_grid_info() feeding Mortality()", {
     expect_match(attr(gi, "crs"), "WGS 84")
   })
 
+  it("keeps a non-square tabular grid's resolution per axis", {
+    grid <- expand.grid(x = seq(0, 10, by = 2.5), y = seq(0, 8, by = 2))
+    info <- build_grid_info(conc_real = data.frame(grid, conc = 1))
+
+    expect_equal(nrow(info), 25L)
+    expect_equal(attr(info, "n_cells"), 25L)
+    expect_equal(attr(info, "res"), c(2.5, 2))
+    expect_equal(attr(info, "ext"), c(-1.25, 11.25, -1, 9), tolerance = 1e-9)
+  })
+
+  it("labels a tabular grid from boundaries, rounded keys included", {
+    # The shipped keys are rounded (5.12, 5.38, ...), which no regular raster
+    # lattice reproduces; the domain label comes from a point-in-polygon join
+    # at the cell coordinates.
+    keys <- .attr_data("grid_info")
+    tab  <- keys[, c("x", "y")]
+    tab$conc <- 1
+
+    gi <- suppressWarnings(suppressMessages(
+      build_grid_info(conc_real = tab, admin = .gi_example_boundaries(),
+                      admin_col = "location")
+    ))
+
+    expect_equal(nrow(gi), nrow(keys))
+    expect_false(anyNA(gi$location))
+    cmp <- merge(gi, keys, by = c("x", "y"),
+                 suffixes = c("_bound", "_table"))
+    expect_equal(as.character(cmp$location_bound),
+                 as.character(cmp$location_table))
+  })
+
   it("errors on a skeleton off the raster grid, and validate = 'off' lets it run", {
     tifs <- .gi_example_tifs(.gi_temp_dir())
 
@@ -186,8 +217,8 @@ describe("build_grid_info() feeding Mortality()", {
       # no matching cell at all: the PWRR branch drops every row of an empty
       # coordinate join and reports "No rows survived the join" instead. The
       # guard is what is under test here, not the numbers.
-      suppressMessages(Mortality(
-        CRF = "GEMM", calc_fild = stale, conc_real = tifs$conc,
+      suppressMessages(mortality(
+        crf = "GEMM", calc_fild = stale, conc_real = tifs$conc,
         pop_total = tifs$pop, age_struc = .attr_data("national_age_structure"),
         mort_rate = .attr_data("national_mortality"),
         mort_lvl = NULL, scenario = "base2015", validate = validate
@@ -221,8 +252,8 @@ describe("build_grid_info() feeding Mortality()", {
     partial <- .attr_data("grid_info")
     partial$x[1:3000] <- matchable(as.numeric(partial$x[1:3000]) + 0.1, 2)
 
-    warned <- capture_warnings(kept <- suppressMessages(Mortality(
-      CRF = "GEMM", calc_fild = partial, conc_real = tifs$conc,
+    warned <- capture_warnings(kept <- suppressMessages(mortality(
+      crf = "GEMM", calc_fild = partial, conc_real = tifs$conc,
       pop_total = tifs$pop, age_struc = .attr_data("national_age_structure"),
       mort_rate = .attr_data("national_mortality"),
       mort_lvl = "location", scenario = "base2015", validate = "warn"

@@ -58,24 +58,24 @@
   s <- .attr_small()
   list(
     calc_fild = s$calc_fild,
-    conc_real = getConc(s$conc_real, "base2015"),
-    conc_cf   = getConc(s$conc_cf, "base2015"),
-    pop_total = getPop(s$pop_total, "base2015"),
-    age_struc = getAge(s$age_struc, "base2015", min_age_groups = 0),
-    mort_rate = getMort(s$mort_rate, "base2015")
+    conc_real = .slice_conc(s$conc_real, "base2015"),
+    conc_cf   = .slice_conc(s$conc_cf, "base2015"),
+    pop_total = .slice_pop(s$pop_total, "base2015"),
+    age_struc = .slice_age(s$age_struc, "base2015", min_age_groups = 0),
+    mort_rate = .slice_mort(s$mort_rate, "base2015")
   )
 }
 
-# Run Mortality() on either fixture with sensible defaults.
+# Run mortality() on either fixture with sensible defaults.
 #
 # `conc_cf` is only passed when explicitly requested: in the PWRR branch the
 # counterfactual exposure drives the risk term while `conc_real` drives the
 # population-weighted RR, so the two are not interchangeable.
-.attr_run <- function(CRF = "GEMM", mort_lvl = "location", long = TRUE,
+.attr_run <- function(crf = "GEMM", mort_lvl = "location", long = TRUE,
                       scenario = NULL, conc_cf = NULL, validate = "off", ...) {
   d <- if (long) .attr_small_long() else .attr_small()
   args <- list(
-    CRF       = CRF,
+    crf       = crf,
     calc_fild = d$calc_fild,
     conc_real = d$conc_real,
     pop_total = d$pop_total,
@@ -89,5 +89,31 @@
   if (!is.null(conc_cf)) {
     args$conc_cf <- conc_cf
   }
-  do.call(Mortality, args)
+  do.call(mortality, args)
+}
+
+# The small fixture with a second scenario added to each table, so a test can
+# build the two groups `decompose()` compares.
+.attr_two_scenario <- function() {
+  s <- .attr_small()
+  s$conc_real$SSP1_2030 <- c(8, 16, 24, 32)
+  s$pop_total$SSP1_2030 <- c(110, 210, 310, 410)
+  s$age_struc$SSP1_2030 <- c(0.4, 0.6)
+  s$mort_rate$SSP1_2030 <- c(900, 2100)
+  s
+}
+
+# The two groups `decompose()` compares: one complete set of single-scenario
+# inputs per group.
+.attr_groups <- function(d, from = "base2015", to = "SSP1_2030") {
+  group <- function(sc) {
+    list(
+      label     = sc,
+      conc_real = .slice_conc(d$conc_real, sc),
+      pop_total = .slice_pop(d$pop_total, sc),
+      age_struc = .slice_age(d$age_struc, sc, min_age_groups = 0),
+      mort_rate = .slice_mort(d$mort_rate, sc)
+    )
+  }
+  list(from = group(from), to = group(to))
 }

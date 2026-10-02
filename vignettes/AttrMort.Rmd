@@ -58,8 +58,8 @@ All files in `inst/extdata/` are synthetic and ship with the package:
 extdata <- system.file("extdata", package = "AttrMort")
 sheet <- function(f) readxl::read_excel(file.path(extdata, f))
 
-deaths <- Mortality(
-  CRF       = "GEMM",
+deaths <- mortality(
+  crf       = "GEMM",
   calc_fild = sheet("grid_info.xlsx"),
   conc_real = sheet("grid_exposure.xlsx"),
   pop_total = sheet("grid_pop.xlsx"),
@@ -73,7 +73,7 @@ head(deaths[, c("x", "y", "location", "ncd+lri_25")])
 ```
 
 The result is one row per grid cell and one `{endpoint}_{age}` column per
-stratum. `Mortality()` prints an `Analysis grain:` line saying how many cells
+stratum. `mortality()` prints an `Analysis grain:` line saying how many cells
 and domains the run resolved and which PWRR branch it took.
 
 ## Domain aggregation and uncertainty
@@ -84,8 +84,8 @@ concentration-response tables (`conc_uncert` adds an exposure perturbation
 chain on top):
 
 ```{r aggregate}
-by_location <- Mortality(
-  CRF          = "GEMM",
+by_location <- mortality(
+  crf          = "GEMM",
   calc_fild    = sheet("grid_info.xlsx"),
   conc_real    = sheet("grid_exposure.xlsx"),
   pop_total    = sheet("grid_pop.xlsx"),
@@ -143,8 +143,8 @@ boundary <- sf::st_sf(
   )
 )
 
-raster_deaths <- Mortality(
-  CRF       = "GEMM",
+raster_deaths <- mortality(
+  crf       = "GEMM",
   conc_real = conc_tif,
   pop_total = pop_tif,
   age_struc = sheet("national_age_structure.xlsx"),
@@ -159,7 +159,7 @@ nrow(raster_deaths)
 sum(unlist(raster_deaths[vapply(raster_deaths, is.numeric, logical(1))]))
 ```
 
-`Mortality()` reports when a supplied `calc_fild` does not match the raster
+`mortality()` reports when a supplied `calc_fild` does not match the raster
 grid, and a multi-band raster whose scenarios do not share one validity mask
 is flagged instead of silently narrowing the grid.
 
@@ -177,7 +177,7 @@ names(cfg$models)
 cfg$models$NO2$endpoints[[1]]
 ```
 
-Pass `cr_config = "<path>"` to use your own configuration, and `CRF =` a
+Pass `cr_config = "<path>"` to use your own configuration, and `crf =` a
 model name from it. A lookup can be a shipped `rda` table, an xlsx file or a
 directory of `MEAN.csv`/`LOW.csv`/`UP.csv`; relative paths resolve against the
 configuration file, not the working directory.
@@ -195,17 +195,17 @@ names(ier)
 head(ier$MEAN)
 ```
 
-To hand a curve directly to `Mortality(CRF =)`, reshape it to the long
+To hand a curve directly to `mortality(crf =)`, reshape it to the long
 contract with columns `conc`, `endpoint`, `age`, `RR`; for anything reused
 across analyses, register it in a configuration instead.
 
 ## Where to go next
 
-* `?Mortality` — the full argument list (`aggregate`, `uncertain`,
+* `?mortality` — the full argument list (`aggregate`, `uncertain`,
   `conc_uncert`, `chunk_ages`, `cr_config`).
-* `?cr_config`, `?RR_std`, `?build_cr_table` — the concentration-response
+* `?cr_config`, `?rr_std`, `?build_cr_table` — the concentration-response
   layer.
-* `?build_grid_info`, `?domain_summary` — reusing one grid across scenarios
+* `?build_grid_info` — reusing one grid across scenarios
   and reducing a gridded analysis to one row per domain.
-* `?Decomposition` — driving-factor decomposition over 24 driver orderings.
+* `?decompose` — driving-factor decomposition over 24 driver orderings.
 * `citation("AttrMort")` and the package `README` for methodology references.

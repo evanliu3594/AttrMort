@@ -2,7 +2,7 @@
 #
 # Builds a lookup table from published coefficients. The coefficients are an
 # argument, the concentration axis and confidence level are configurable, and
-# the result is exactly what RR_std() consumes:
+# the result is exactly what rr_std() consumes:
 # a list(MEAN, LOW, UP) of wide data.frames carrying a `conc` column plus one
 # `{cause}_{age}` column per stratum.
 #
@@ -21,11 +21,10 @@
     return(as.data.frame(parameters))
   }
   if (!is.character(parameters) || length(parameters) != 1) {
-    stop("`parameters` must be a data.frame or a single file path.",
-         call. = FALSE)
+    .abort("`parameters` must be a data.frame or a single file path.")
   }
   if (!file.exists(parameters)) {
-    stop("File not found: ", parameters, call. = FALSE)
+    .abort("File not found: {parameters}")
   }
   ext <- tolower(file_ext(parameters))
   switch(ext,
@@ -33,8 +32,10 @@
     txt = as.data.frame(read_csv(parameters, show_col_types = FALSE)),
     xls = ,
     xlsx = as.data.frame(read_excel(parameters)),
-    stop("Unsupported coefficient file format: .", ext,
-         ". Use .csv, .txt, .xls or .xlsx.", call. = FALSE)
+    .abort(str_c(
+      "Unsupported coefficient file format: .{ext}. ",
+      "Use .csv, .txt, .xls or .xlsx."
+    ))
   )
 }
 
@@ -47,7 +48,7 @@
   if (length(hit) == 0) {
     return(coefs)
   }
-  names(coefs)[names(coefs) == hit[1]] <- target
+  coefs <- rename_with(coefs, ~ target, all_of(hit[1]))
   coefs
 }
 
@@ -55,14 +56,14 @@
 # that built tables keep the endpoint names of their coefficients.
 .normalise_cr_cause <- function(x) {
   x <- as.character(x)
-  ifelse(tolower(x) == "alri", "LRI", x)
+  if_else(tolower(x) == "alri", "LRI", x)
 }
 
 # "All Age" -> "ALL"; "25.0" -> "25".
 .normalise_cr_age <- function(x) {
   x <- as.character(x)
-  x <- ifelse(str_detect(x, regex("^(A|a)ll ?(A|a)ge", ignore_case = TRUE)),
-              "ALL", x)
+  x <- if_else(str_detect(x, regex("^(A|a)ll ?(A|a)ge", ignore_case = TRUE)),
+               "ALL", x)
   str_replace(x, "^([0-9]+)\\.0+$", "\\1")
 }
 
@@ -85,23 +86,26 @@
 
   missing <- setdiff(required, names(coefs))
   if (length(missing) > 0) {
-    stop("Coefficient table for model \"", model,
-         "\" is missing column(s): ", paste(missing, collapse = ", "),
-         ". Columns found: ", paste(names(coefs), collapse = ", "), ".",
-         call. = FALSE)
+    .abort(str_c(
+      "Coefficient table for model \"{model}\" ",
+      "is missing column(s): {paste(missing, collapse = \", \")}. ",
+      "Columns found: {paste(names(coefs), collapse = \", \")}."
+    ))
   }
   if (nrow(coefs) == 0) {
-    stop("Coefficient table is empty.", call. = FALSE)
+    .abort("Coefficient table is empty.")
   }
 
   numeric_cols <- setdiff(required, c("cause", "age"))
   for (col in numeric_cols) {
     coefs[[col]] <- suppressWarnings(as.numeric(coefs[[col]]))
   }
-  bad <- vapply(numeric_cols, function(col) anyNA(coefs[[col]]), logical(1))
+  bad <- map_lgl(numeric_cols, function(col) anyNA(coefs[[col]]))
   if (any(bad)) {
-    stop("Coefficient column(s) are not numeric: ",
-         paste(numeric_cols[bad], collapse = ", "), ".", call. = FALSE)
+    .abort(str_c(
+      "Coefficient column(s) are not numeric: ",
+      "{paste(numeric_cols[bad], collapse = \", \")}."
+    ))
   }
 
   coefs$cause <- .normalise_cr_cause(coefs$cause)
@@ -130,7 +134,7 @@
     }
 
     # `curves` is a draws x concentrations matrix, so summarise down columns.
-    out[[i]] <- data.frame(
+    out[[i]] <- tibble(
       conc  = axis_chr,
       cause = coefs$cause[idx[1]],
       age   = coefs$age[idx[1]],
@@ -138,11 +142,10 @@
       LOW   = apply(curves, 2, stats::quantile, probs = probs[1],
                     names = FALSE),
       UP    = apply(curves, 2, stats::quantile, probs = probs[2],
-                    names = FALSE),
-      stringsAsFactors = FALSE
+                    names = FALSE)
     )
   }
-  do.call(rbind, out)
+  list_rbind(out)
 }
 
 # GEMM: one parameter set per cause x age stratum, so the interval comes from
@@ -161,14 +164,13 @@
   gama   <- rep(coefs$gama, each = each)
   base   <- log(1 + zz / alpha) / (1 + exp((mu - zz) / gama))
 
-  data.frame(
+  tibble(
     conc  = rep(axis_chr, times = n),
     cause = rep(coefs$cause, each = each),
     age   = rep(coefs$age, each = each),
     MEAN  = exp(theta * base),
     LOW   = exp((theta - zfac * se) * base),
-    UP    = exp((theta + zfac * se) * base),
-    stringsAsFactors = FALSE
+    UP    = exp((theta + zfac * se) * base)
   )
 }
 
@@ -176,7 +178,7 @@
 # variants (IER2010, IER2017, ...) all use the IER form, as in the source.
 .cr_model_form <- function(model) {
   if (!is.character(model) || length(model) != 1) {
-    stop("`model` must be a single character string.", call. = FALSE)
+    .abort("`model` must be a single character string.")
   }
   key <- toupper(trimws(model))
   if (str_detect(key, "^IER")) {
@@ -185,17 +187,19 @@
   if (str_detect(key, "^GEMM")) {
     return("GEMM")
   }
-  stop("`model` must be \"IER\" (or an IER variant such as \"IER2017\") or ",
-       "\"GEMM\". Got: \"", model, "\".", call. = FALSE)
+  .abort(str_c(
+    "`model` must be \"IER\" (or an IER variant such as \"IER2017\") or ",
+    "\"GEMM\". Got: \"{model}\"."
+  ))
 }
 
 #' Build a concentration-response lookup table from coefficients
 #'
 #' Turns published concentration-response coefficients into the wide
-#' `list(MEAN, LOW, UP)` structure that [RR_std()] consumes and that the
+#' `list(MEAN, LOW, UP)` structure that [rr_std()] consumes and that the
 #' built-in tables in `data/` use. This is the entry point for a pollutant or
 #' endpoint set that the package does not ship: supply the coefficients and
-#' get a table that can be handed to `Mortality(CRF = )` — either directly as
+#' get a table that can be handed to `mortality(crf = )` — either directly as
 #' the list, or as a three-sheet workbook after `path` is written.
 #'
 #' @param parameters A data.frame or a `.csv`/`.txt`/`.xls`/`.xlsx` path of
@@ -206,11 +210,12 @@
 #'   `mu` and `gama`. Coefficient files with other spellings (``Causes``, ``Age``,
 #'   `zcf`, `delta`) are accepted, and `ALRI`/`All Age` are normalised to
 #'   `LRI`/`ALL`.
-#' @param model Character. Which functional form to use: `"IER"` or `"GEMM"`.
+#' @param model Character. Which functional form to use: `"IER"` (default) or
+#'   `"GEMM"`. A single string: the model is chosen per call, not guessed.
 #' @param conc Numeric vector of concentrations to evaluate.
 #'   Default `seq(0, 300, 0.1)`, the axis used for the shipped tables.
 #' @param dgt Integer. Decimal places used to render the concentration keys,
-#'   matching `dgt_conc` in [Mortality()]. Default 1.
+#'   matching `dgt_conc` in [mortality()]. Default 1.
 #' @param level Numeric. Confidence level for the `LOW`/`UP` sheets.
 #'   Default 0.95.
 #' @param path Character or `NULL`. When given, the three sheets are also
@@ -220,7 +225,7 @@
 #'   with a character `conc` column and one `\{cause\}_\{age\}` column per
 #'   stratum.
 #'
-#' @seealso [RR_std()], [cr_models()], [Mortality()]
+#' @seealso [rr_std()], [cr_models()], [mortality()]
 #'
 #' @export
 #'
@@ -231,7 +236,7 @@
 #' names(tab)
 #' head(tab$MEAN)
 build_cr_table <- function(parameters,
-                           model         = c("IER", "GEMM"),
+                           model         = "IER",
                            conc          = NULL,
                            dgt           = 1,
                            level         = 0.95,
@@ -239,14 +244,13 @@ build_cr_table <- function(parameters,
   model <- .cr_model_form(model)
 
   if (!is.numeric(level) || length(level) != 1 || level <= 0 || level >= 1) {
-    stop("`level` must be a single number strictly between 0 and 1.",
-         call. = FALSE)
+    .abort("`level` must be a single number strictly between 0 and 1.")
   }
   if (is.null(conc)) {
     conc <- seq(0, 300, 0.1)
   }
   if (!is.numeric(conc) || length(conc) == 0) {
-    stop("`conc` must be a non-empty numeric vector.", call. = FALSE)
+    .abort("`conc` must be a non-empty numeric vector.")
   }
 
   coefs   <- .cr_coefficients(parameters, model)
@@ -260,7 +264,7 @@ build_cr_table <- function(parameters,
     .cr_long_gemm(coefs, axis_chr, axis_num, probs)
   }
 
-  tabs <- lapply(c("MEAN", "LOW", "UP"), function(index) {
+  tabs <- map(c("MEAN", "LOW", "UP"), function(index) {
     long |>
       select(conc, cause, age, RR = all_of(index)) |>
       pivot_wider(names_from = c(cause, age), names_sep = "_",
@@ -270,9 +274,11 @@ build_cr_table <- function(parameters,
 
   if (!is.null(path)) {
     if (!requireNamespace("writexl", quietly = TRUE)) {
-      stop("Writing the lookup table requires the `writexl` package, which ",
-           "is not installed. Install it with install.packages(\"writexl\"), ",
-           "or use the returned list directly.", call. = FALSE)
+      .abort(str_c(
+        "Writing the lookup table requires the `writexl` package, which ",
+        "is not installed. Install it with install.packages(\"writexl\"), ",
+        "or use the returned list directly."
+      ))
     }
     writexl::write_xlsx(tabs, path = path)
   }

@@ -18,6 +18,15 @@ describe("build_cr_table() for the IER form", {
     expect_equal(tab$MEAN$IHD_25[2], expected, tolerance = 1e-12)
   })
 
+  it("defaults to the IER form when `model` is omitted", {
+    tab <- build_cr_table(ier, conc = c(3, 10))
+    expect_named(tab, c("MEAN", "LOW", "UP"))
+    expect_true("IHD_25" %in% names(tab$MEAN))
+    expect_equal(tab$MEAN$IHD_25[2],
+                 5 * (1 - exp(-0.01 * sqrt(10 - 3))) + 1,
+                 tolerance = 1e-12)
+  })
+
   it("summarises the interval across the parameter draws", {
     draws <- data.frame(cause = "IHD", age = "25",
                         alpha = c(4, 5, 6), beta = 0.01,
@@ -98,7 +107,7 @@ describe("build_cr_table() output contract", {
     expect_equal(tab$MEAN$conc, c("0", "0.25"))
   })
 
-  it("produces columns that RR_std() can reshape", {
+  it("produces columns that rr_std() can reshape", {
     tab <- build_cr_table(gemm2, model = "GEMM", conc = seq(0, 5, 0.1))
     long <- tab$MEAN |>
       pivot_longer(-conc, names_to = c("endpoint", "age"), names_sep = "_")

@@ -150,6 +150,62 @@ describe(".resolve_target_res()", {
     expect_equal(res, 0.05)
     expect_error(AttrMort:::.resolve_target_res(r, NULL, -1), "must be positive")
   })
+
+  it("keeps a non-square raster's two axes instead of averaging them", {
+    r <- terra::rast(nrows = 5, ncols = 6, xmin = -10, xmax = 5,
+                     ymin = -5, ymax = 5)              # 2.5 x 2 degrees
+    terra::crs(r) <- "EPSG:4326"
+
+    expect_message(
+      res <- AttrMort:::.resolve_target_res(r, NULL, NULL),
+      "auto-confirmed"
+    )
+    expect_equal(res, c(2.5, 2))
+  })
+
+  it("accepts a two-number target_res and validates it", {
+    r <- .make_raster(4, 4)
+    expect_message(res <- AttrMort:::.resolve_target_res(r, NULL, c(2.5, 2)),
+                   "Using specified target resolution")
+    expect_equal(res, c(2.5, 2))
+    expect_error(AttrMort:::.resolve_target_res(r, NULL, c(0, 1)),
+                 "must be positive")
+    expect_error(AttrMort:::.resolve_target_res(r, NULL, c(1, 2, 3)),
+                 "must be positive")
+  })
+})
+
+describe("align_to_target() on a non-square grid", {
+  it("resamples onto the two-axis resolution without changing the grid", {
+    conc <- terra::rast(nrows = 5, ncols = 6, xmin = -10, xmax = 5,
+                        ymin = -5, ymax = 5)          # 2.5 x 2 degrees
+    terra::values(conc) <- 30
+    terra::crs(conc) <- "EPSG:4326"
+    pop <- conc
+    terra::values(pop) <- 1
+
+    aligned <- AttrMort:::align_to_target(
+      list(conc = conc, pop = pop), target_res = c(2.5, 2), pop_names = "pop"
+    )
+
+    expect_equal(as.numeric(terra::res(aligned$conc)), c(2.5, 2))
+    expect_equal(terra::ncell(aligned$conc), 30)
+    expect_equal(terra::global(aligned$pop, fun = "sum", na.rm = TRUE)[[1]], 30)
+  })
+
+  it("conserves a population total with per-axis aggregation", {
+    pop <- terra::rast(nrows = 16, ncols = 20, xmin = 0, xmax = 10,
+                       ymin = 0, ymax = 8)            # 0.5 degrees, 320 cells
+    terra::values(pop) <- 1
+    terra::crs(pop) <- "EPSG:4326"
+    target <- terra::rast(terra::ext(pop), resolution = c(2.5, 2))
+    terra::crs(target) <- "EPSG:4326"
+
+    out <- AttrMort:::.aggregate_pop(pop, target)
+
+    expect_equal(as.numeric(terra::res(out)), c(2.5, 2))
+    expect_equal(terra::global(out, fun = "sum", na.rm = TRUE)[[1]], 320)
+  })
 })
 
 describe("shapefile_to_grid()", {
@@ -192,7 +248,7 @@ describe("shapefile_to_grid()", {
   })
 })
 
-describe("Mortality() from gridded GeoTIFF inputs", {
+describe("mortality() from gridded GeoTIFF inputs", {
   it("aligns two rasters and computes the burden end to end", {
     dir <- tempfile("attrmort-rast")
     dir.create(dir)
@@ -215,8 +271,8 @@ describe("Mortality() from gridded GeoTIFF inputs", {
     mort <- data.frame(location = "A", age = c("25", "30"),
                        endpoint = "ncd+lri", base2015 = c(1000, 2000))
 
-    out <- suppressMessages(Mortality(
-      CRF = "GEMM", calc_fild = fld, scenario = "base2015",
+    out <- suppressMessages(mortality(
+      crf = "GEMM", calc_fild = fld, scenario = "base2015",
       conc_real = conc_path, pop_total = pop_path,
       age_struc = age, mort_rate = mort, mort_lvl = "location",
       target_res = 3, validate = "off"
@@ -227,7 +283,7 @@ describe("Mortality() from gridded GeoTIFF inputs", {
 
     # Every cell sees a flat concentration of 30, so PWRR == RR and the
     # population of a target cell is 9 * 10 = 90.
-    rr_all <- RR_std("GEMM", "MEAN")
+    rr_all <- rr_std("GEMM", "MEAN")
     rr <- rr_all$RR[rr_all$endpoint == "ncd+lri" & rr_all$age == "25" &
                       rr_all$conc == "30"]
     m25 <- 90 * 0.5 * 1000 / 1e5

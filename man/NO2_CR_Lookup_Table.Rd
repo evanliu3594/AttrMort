@@ -3,16 +3,22 @@
 \docType{data}
 \name{NO2_CR_Lookup_Table}
 \alias{NO2_CR_Lookup_Table}
-\title{the C-R curves for NO2 by Larkin et al.}
+\title{NO2 concentration-response lookup table}
 \format{
 A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
-  wide tibble: a character \code{conc} column rendered at one decimal place
-  plus one column per \code{endpoint_age} stratum.
+  wide data.frame: a character \code{conc} column rendered at one decimal
+  place plus one column per \code{endpoint_age} stratum.
+}
+\source{
+The NO<sub>2</sub> relative-risk curve of the Global Burden of
+  Disease risk-factor analysis (Institute for Health Metrics and
+  Evaluation), attributed there to Larkin et al.
 }
 \usage{
 NO2_CR_Lookup_Table
 }
 \description{
-the C-R curves for NO2 by Larkin et al.
+The nitrogen dioxide (NO<sub>2</sub>) relative-risk curve of the Global
+Burden of Disease risk-factor analysis, attributed to Larkin et al.
 }
 \keyword{datasets}

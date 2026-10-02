@@ -3,16 +3,21 @@
 \docType{data}
 \name{GEMM_Lookup_Table}
 \alias{GEMM_Lookup_Table}
-\title{the GEMM C-R curves by Burnett et al.}
+\title{GEMM concentration-response lookup table}
 \format{
 A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
-  wide tibble: a character \code{conc} column rendered at one decimal place
-  plus one column per \code{endpoint_age} stratum.
+  wide data.frame: a character \code{conc} column rendered at one decimal
+  place plus one column per \code{endpoint_age} stratum.
+}
+\source{
+Burnett et al. (2014), \emph{Environmental Health Perspectives}
+  122(4): 397-403, doi:10.1289/ehp.1307049.
 }
 \usage{
 GEMM_Lookup_Table
 }
 \description{
-the GEMM C-R curves by Burnett et al.
+The Global Exposure mortality Model (GEMM) curves for PM<sub>2.5</sub>
+mortality, the default model of [mortality()].
 }
 \keyword{datasets}

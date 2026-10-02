@@ -13,7 +13,7 @@ aggregate_mortality(
 )
 }
 \arguments{
-\item{x}{A data.frame from [Mortality()], or a named list of them (one per
+\item{x}{A data.frame from [mortality()], or a named list of them (one per
 scenario).  The name of each element is used as the `scenario` column of
 the corresponding output.}
 
@@ -40,14 +40,14 @@ it is joined by the domain columns the two share.}
   `\{endpoint\}_\{age\}` columns are returned alongside it.}
 
 \item{na_rm}{Logical. Drop `NA` when summing (passed to `sum()` as
-`na.rm`). Default `TRUE`, matching [Mortality()]'s use of `na.rm = TRUE`.}
+`na.rm`). Default `TRUE`, matching [mortality()]'s use of `na.rm = TRUE`.}
 }
 \value{
 A data.frame with the domain columns, a `total` column, the requested
   marginals, and a `scenario` column when `x` was a named list.
 }
 \description{
-Takes the wide grid-level output of [Mortality()] — one row per grid cell,
+Takes the wide grid-level output of [mortality()] — one row per grid cell,
 one column per `\{endpoint\}_\{age\}` combination, plus the coordinate columns
 (`x`/`y`) and any domain columns carried over from the attribution field —
 and aggregates it to administrative domains.
@@ -67,12 +67,13 @@ coordinate columns are never part of the sum.
 }
 \examples{
 \dontrun{
-  grid <- Mortality(
-    CRF = "GEMM", calc_fild = grid_info,
-    conc_real = getConc(grid_exposure, "base2015"),
-    pop_total = getPop(grid_pop, "base2015"),
-    age_struc = getAge(national_age_structure, "base2015"),
-    mort_rate = getMort(national_mortality, "base2015"),
+Needs a mortality() result to post-process; see its examples.
+  grid <- mortality(
+    crf = "GEMM", calc_fild = grid_info,
+    conc_real = .slice_conc(grid_exposure, "base2015"),
+    pop_total = .slice_pop(grid_pop, "base2015"),
+    age_struc = .slice_age(national_age_structure, "base2015"),
+    mort_rate = .slice_mort(national_mortality, "base2015"),
     mort_lvl = "location"
   )
 
@@ -90,6 +91,6 @@ coordinate columns are never part of the sum.
 }
 }
 \seealso{
-[aggregate_ci()] for CI-branch (`Mortality(CI = ...)`) output,
-  [write_mortality_xlsx()] is internal; write with `writexl::write_xlsx()`.
+[aggregate_ci()] for CI-branch (`mortality(ci = ...)`) output,
+  [write_mortality_xlsx()] to write a result to a caller-supplied `path`.
 }

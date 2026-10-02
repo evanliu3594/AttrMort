@@ -3,16 +3,22 @@
 \docType{data}
 \name{MRBRT2019_Lookup_Table}
 \alias{MRBRT2019_Lookup_Table}
-\title{the MRBRT C-R curves for PM25 by GBD2019.}
+\title{MR-BRT concentration-response lookup table (GBD 2019)}
 \format{
 A list with elements \code{MEAN}, \code{LOW} and \code{UP}, each a
-  wide tibble: a character \code{conc} column rendered at one decimal place
-  plus one column per \code{endpoint_age} stratum.
+  wide data.frame: a character \code{conc} column rendered at one decimal
+  place plus one column per \code{endpoint_age} stratum.
+}
+\source{
+Global Burden of Disease Study 2019 risk-factor analysis (Institute
+  for Health Metrics and Evaluation), MR-BRT relative-risk curves.
 }
 \usage{
 MRBRT2019_Lookup_Table
 }
 \description{
-the MRBRT C-R curves for PM25 by GBD2019.
+The MR-BRT (meta-regression--Bayesian, regularised, trimmed) relative-risk
+curves for PM<sub>2.5</sub> mortality from the Global Burden of Disease 2019
+risk-factor analysis.
 }
 \keyword{datasets}

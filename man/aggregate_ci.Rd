@@ -2,7 +2,7 @@
 % Please edit documentation in R/aggregate.R
 \name{aggregate_ci}
 \alias{aggregate_ci}
-\title{Aggregate Mortality() output carrying CI branches}
+\title{Aggregate mortality() output carrying CI branches}
 \usage{
 aggregate_ci(x, calc_fild = NULL, at = "location", by = "total")
 }
@@ -24,17 +24,17 @@ A data.frame with the domain columns, the total triplet
 }
 \description{
 Accepts a mortality result whose columns are named `\{endpoint\}_\{age\}_\{CI\}`
-with `CI` in `MEAN`/`UP`/`LOW` — the three CI branches of [Mortality()]
+with `ci` in `MEAN`/`UP`/`LOW` — the three CI branches of [mortality()]
 sitting side by side in the same data.frame — and aggregates each branch
 independently by domain.  Every row of the result keeps the three branches
 together, as `total_MEAN` / `total_UP` / `total_LOW` (and
 `\{endpoint\}_all_MEAN` / `..._UP` / `..._LOW`, etc., for `by = "endpoint"`
 or `by = "age"`).
 
-[Mortality()] itself does not append the `CI` suffix, so build the input by
+[mortality()] itself does not append the `ci` suffix, so build the input by
 running it once per branch and pasting the suffix on, e.g.
-`paste0(names(x), "_MEAN")` for the `CI = "MEAN"` run.  `_UPPER` / `_LOWER`
-(the names [Mortality()] uses for its `CI` argument) are accepted as aliases
+`paste0(names(x), "_MEAN")` for the `ci = "MEAN"` run.  `_UPPER` / `_LOWER`
+(the names [mortality()] uses for its `ci` argument) are accepted as aliases
 and normalized to `_UP` / `_LOW` in the output.
 
 The column-name convention is the one described in [aggregate_mortality()],
@@ -44,16 +44,17 @@ group, so `ncd+lri_50_UP` → endpoint `ncd+lri`, age `50`, CI `UP`.
 }
 \examples{
 \dontrun{
-  run <- function(ci) Mortality(
-    CRF = "GEMM", CI = ci, calc_fild = grid_info,
-    conc_real = getConc(grid_exposure, "base2015"),
-    pop_total = getPop(grid_pop, "base2015"),
-    age_struc = getAge(national_age_structure, "base2015"),
-    mort_rate = getMort(national_mortality, "base2015"),
+Needs the three CI-suffixed tables built by three mortality() runs.
+  run <- function(ci) mortality(
+    crf = "GEMM", ci = ci, calc_fild = grid_info,
+    conc_real = .slice_conc(grid_exposure, "base2015"),
+    pop_total = .slice_pop(grid_pop, "base2015"),
+    age_struc = .slice_age(national_age_structure, "base2015"),
+    mort_rate = .slice_mort(national_mortality, "base2015"),
     mort_lvl = "location"
   )
 
-  # Mortality() does not add the CI suffix — paste it on per branch
+  # mortality() does not add the CI suffix — paste it on per branch
   mean_ <- run("MEAN"); up <- run("UPPER"); low <- run("LOWER")
   vals <- setdiff(names(mean_), c("x", "y", "location"))
   names(mean_)[names(mean_) \%in\% vals] <- paste0(vals, "_MEAN")

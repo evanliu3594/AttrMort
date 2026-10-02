@@ -1,6 +1,6 @@
-# Tests for the aggregation and uncertainty arguments of Mortality()
+# Tests for the aggregation and uncertainty arguments of mortality()
 
-describe("Mortality(aggregate = ...)", {
+describe("mortality(aggregate = ...)", {
   it("sums the grid-level burdens within a domain", {
     grid <- .attr_run()
     agg  <- .attr_run(aggregate = TRUE)
@@ -15,8 +15,8 @@ describe("Mortality(aggregate = ...)", {
   it("aggregates onto an explicitly named column vector", {
     d <- .attr_small_long()
     d$calc_fild$region <- "R1"
-    agg <- Mortality(
-      CRF = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
+    agg <- mortality(
+      crf = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
       pop_total = d$pop_total, age_struc = d$age_struc,
       mort_rate = d$mort_rate, mort_lvl = "location",
       aggregate = c("region", "location"), validate = "off"
@@ -49,13 +49,30 @@ describe("Mortality(aggregate = ...)", {
   })
 
   it("falls back to the whole field when aggregate = TRUE and mort_lvl is NULL", {
+    # An uncalibrated run is a documented mode, not a fault: it is reported
+    # with a message rather than a warning.
     expect_message(
-      expect_warning(agg <- .attr_run(aggregate = TRUE, mort_lvl = NULL),
-                     "mort_lvl"),
+      agg <- suppressWarnings(.attr_run(aggregate = TRUE, mort_lvl = NULL, validate = "warn")),
       "whole field"
+    )
+    expect_message(
+      suppressWarnings(.attr_run(aggregate = TRUE, mort_lvl = NULL, validate = "warn")),
+      "not calibrated against"
     )
     expect_equal(nrow(agg), 1)
     expect_true("total" %in% names(agg))
+  })
+
+  it("reports a whole-field range when aggregate = TRUE and mort_lvl is NULL", {
+    # Uncalibrated grid-level runs aggregate to one row with `at = character(0)`;
+    # the range must be attached to that row instead of erroring.
+    agg <- suppressMessages(
+      .attr_run(aggregate = TRUE, mort_lvl = NULL, uncertain = TRUE)
+    )
+    expect_equal(nrow(agg), 1)
+    expect_true(all(c("total", "conc_pwe", "CI_LOW", "CI_UP") %in% names(agg)))
+    expect_lte(agg$CI_LOW, agg$total)
+    expect_lte(agg$total, agg$CI_UP)
   })
 
   it("rejects an unsupported aggregate value or breakdown", {
@@ -71,11 +88,11 @@ describe("Mortality(aggregate = ...)", {
   })
 })
 
-describe("Mortality(uncertain = TRUE)", {
+describe("mortality(uncertain = TRUE)", {
   run_ci <- function(index, ...) {
     d <- .attr_small_long()
-    Mortality(
-      CRF = "GEMM", CI = index, calc_fild = d$calc_fild,
+    mortality(
+      crf = "GEMM", ci = index, calc_fild = d$calc_fild,
       conc_real = d$conc_real, pop_total = d$pop_total,
       age_struc = d$age_struc, mort_rate = d$mort_rate,
       mort_lvl = "location", validate = "off", ...

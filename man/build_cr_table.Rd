@@ -6,7 +6,7 @@
 \usage{
 build_cr_table(
   parameters,
-  model = c("IER", "GEMM"),
+  model = "IER",
   conc = NULL,
   dgt = 1,
   level = 0.95,
@@ -23,13 +23,14 @@ cause and age group: the interval is taken across those draws). For
 `zcf`, `delta`) are accepted, and `ALRI`/`All Age` are normalised to
 `LRI`/`ALL`.}
 
-\item{model}{Character. Which functional form to use: `"IER"` or `"GEMM"`.}
+\item{model}{Character. Which functional form to use: `"IER"` (default) or
+`"GEMM"`. A single string: the model is chosen per call, not guessed.}
 
 \item{conc}{Numeric vector of concentrations to evaluate.
 Default `seq(0, 300, 0.1)`, the axis used for the shipped tables.}
 
 \item{dgt}{Integer. Decimal places used to render the concentration keys,
-matching `dgt_conc` in [Mortality()]. Default 1.}
+matching `dgt_conc` in [mortality()]. Default 1.}
 
 \item{level}{Numeric. Confidence level for the `LOW`/`UP` sheets.
 Default 0.95.}
@@ -44,10 +45,10 @@ A named list of three wide data.frames (`MEAN`, `LOW`, `UP`), each
 }
 \description{
 Turns published concentration-response coefficients into the wide
-`list(MEAN, LOW, UP)` structure that [RR_std()] consumes and that the
+`list(MEAN, LOW, UP)` structure that [rr_std()] consumes and that the
 built-in tables in `data/` use. This is the entry point for a pollutant or
 endpoint set that the package does not ship: supply the coefficients and
-get a table that can be handed to `Mortality(CRF = )` — either directly as
+get a table that can be handed to `mortality(crf = )` — either directly as
 the list, or as a three-sheet workbook after `path` is written.
 }
 \examples{
@@ -58,5 +59,5 @@ names(tab)
 head(tab$MEAN)
 }
 \seealso{
-[RR_std()], [cr_models()], [Mortality()]
+[rr_std()], [cr_models()], [mortality()]
 }

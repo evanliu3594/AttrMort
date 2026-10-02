@@ -28,8 +28,8 @@ package:
 extdata <- system.file("extdata", package = "AttrMort")
 sheet   <- function(f) readxl::read_excel(file.path(extdata, f))
 
-result <- Mortality(
-  CRF       = "GEMM",
+result <- mortality(
+  crf       = "GEMM",
   calc_fild = sheet("grid_info.xlsx"),
   conc_real = sheet("grid_exposure.xlsx"),          # wide: one column per scenario
   pop_total = sheet("grid_pop.xlsx"),
@@ -39,6 +39,15 @@ result <- Mortality(
   mort_lvl  = "location"                        # PWRR calibration domain
 )
 ```
+
+`scenario =` is a **per-input column selector**, not a contract across inputs:
+an input that does not carry the column is used as it is when it has the
+canonical column (`conc`, `pop`, `prop`, `mortrate`) or a single numeric value
+column. A long population table whose column is called `Pop2017` therefore
+needs no rename, a wide exposure can be mixed with long auxiliary tables, and
+the package never judges whether the inputs belong to the same scenario or
+year. When several value columns are possible and none is canonical, the call
+stops and lists them instead of picking one.
 
 The shipped example data are synthetic: three fictional countries on a 0.25°
 grid (`grid_info`, `grid_exposure`, `grid_pop`) plus national tables
@@ -50,8 +59,8 @@ Rasters and files can be handed over directly — formats, grids and column
 names are resolved internally:
 
 ```r
-Mortality(
-  CRF       = "GEMM",
+mortality(
+  crf       = "GEMM",
   scenario  = "base2015",
   calc_fild = "admin_grid.csv",
   conc_real = "pm25_scenarios.tif",   # defines the target grid
@@ -65,6 +74,10 @@ Mortality(
 )
 ```
 
+Resolution is kept per axis: a 2.5° x 2° product stays on its own grid, and
+`target_res` takes either one number (square) or two (`c(2.5, 2)`). A raster
+input is never resampled onto the average of its x and y cell size.
+
 ## Raster-only runs
 
 A raster exposure product already carries the analysis grid, so `calc_fild`
@@ -74,8 +87,8 @@ boundaries** (`rnaturalearth`, scale 110) rasterized onto that grid — no
 boundary file needed. GeoTIFF and netCDF (`.nc`) exposure both work:
 
 ```r
-Mortality(
-  CRF       = "GEMM",
+mortality(
+  crf       = "GEMM",
   conc_real = "pm25_base2015.tif",    # or .nc; defines the grid
   pop_total = "population.tif",       # aggregated onto that grid
   age_struc = "age_structure.csv",
@@ -97,62 +110,29 @@ cells, age groups and endpoints (roughly 2 GB per pass). The split is
 numerically exact and a chunked run is identical to an unchunked one; use
 `chunk_ages =` to set the number of strata per pass yourself.
 
-## National-only workflow (domain grain)
+The joins inside the pipeline pass their keys explicitly, so a run prints only
+its own messages -- no per-join `Joining with \`by = ...\`` lines.
 
-When the answer is wanted per country rather than per grid cell, reduce the
-exposure to a domain table first:
+## Aggregating to a domain
+
+`aggregate = TRUE` sums the grid-level result by the domain column of
+`calc_fild` (or by the `mort_lvl` column when one was named), keeping
+`conc_pwe` -- the population-weighted exposure behind each row -- beside the
+deaths:
 
 ```r
-# One row per country: the population-weighted mean concentration, the
-# unweighted mean next to it, the country population and the number of cells
-# behind each row. `.rds`, `.csv` or `.xlsx`; the table is returned either way.
-ds <- domain_summary(
-  conc_real = sheet("grid_exposure.xlsx"),
+by_country <- mortality(
+  crf = "GEMM", calc_fild = grid_info, conc_real = sheet("grid_exposure.xlsx"),
   pop_total = sheet("grid_pop.xlsx"),
-  admin     = "boundaries.shp",       # supplies the domain labels
-  admin_col = "iso3",
-  scenario  = "base2015",
-  path      = "domain_summary.csv"
-)
-
-# One row per domain: PWRR has nothing left to average over, so the burden is
-# evaluated once per domain, at that domain's population-weighted mean
-Mortality(
-  CRF       = "GEMM",
-  calc_fild = data.frame(location = ds$iso3),         # domain-only skeleton
-  conc_real = data.frame(location = ds$iso3, base2015 = ds$conc_pwe),
-  pop_total = data.frame(location = ds$iso3, base2015 = ds$pop_total),
   age_struc = sheet("national_age_structure.xlsx"),
   mort_rate = sheet("national_mortality.xlsx"),
-  scenario  = "base2015",
-  mort_lvl  = "location"
+  mort_lvl = "location", aggregate = TRUE
 )
 ```
 
-The domain labels come from `admin =` (rasterized onto the grid the
-concentration raster brings with it) or from a domain column the exposure
-table already carries; `mort_lvl =` names the resulting column. Without one,
-`domain_summary()` stops and says how to supply it rather than inventing a
-domain.
-
-This is a **different 口径** from the grid path, not a shortcut through it.
-On the grid a domain's PWRR is the population-weighted mean of the relative
-risks of its cells; on a domain-only skeleton it is the relative risk at the
-domain's population-weighted mean concentration -- mean of RR against RR of
-mean, a Jensen gap. On the shipped example the two national totals differ by
-under 0.1% per country, and they are never identical, so the grain is never
-dispatched silently: every `Mortality()` run prints one line saying which
-grain it resolved and which PWRR branch it took,
-
-```
-Analysis grain: 6000 cell(s) in 3 domain(s) on a 0.25 deg grid; PWRR calibrated per domain.
-Analysis grain: 3 domain(s) with one row each; PWRR reduces to a single RR evaluation per domain (domain-level burden).
-Analysis grain: 6000 cell(s) with no domain column; grid-level PAF without calibration.
-```
-
-and `domain_summary()` reports `conc_mean` beside `conc_pwe` so that the two
-concentrations can be compared directly. `validate = "off"` is the quiet mode
-and prints nothing.
+`aggregate_by` picks the breakdown (`"total"`, `"endpoint"`, `"age"`,
+`"all"`), and `uncertain = TRUE` adds the `CI_LOW`/`CI_UP` columns to the
+aggregated table as well.
 
 ## One grid, several scenarios
 
@@ -170,15 +150,15 @@ gi <- build_grid_info(
   path      = "grid_info.rds"         # .rds, .csv or .xlsx
 )
 
-Mortality(CRF = "GEMM", calc_fild = gi, scenario = "base2015",    ...)
-Mortality(CRF = "GEMM", calc_fild = gi, scenario = "scenario2030", ...)
+mortality(crf = "GEMM", calc_fild = gi, scenario = "base2015",    ...)
+mortality(crf = "GEMM", calc_fild = gi, scenario = "scenario2030", ...)
 ```
 
 `build_grid_info()` runs the same alignment, ingestion and boundary
-rasterization steps `Mortality()` runs, so `gi` describes exactly the grid
+rasterization steps `mortality()` runs, so `gi` describes exactly the grid
 those calls use, and it carries no `conc`/`pop` values -- only the grid. It also
 works on a table (`build_grid_info(conc_real = sheet("grid_info.xlsx"))`) and on
-any `SpatRaster`. Handing the table back next to rasters makes `Mortality()`
+any `SpatRaster`. Handing the table back next to rasters makes `mortality()`
 check it: coordinate keys that match no raster cell are reported with their
 count and the grid resolution, the usual cause being a table written for
 another resolution, fixed by regenerating it with `build_grid_info()` or by
@@ -194,7 +174,7 @@ turns it off.
 | Concentration (`conc_real`, `conc_cf`) | data.frame, CSV, Excel, GeoTIFF, netCDF, `SpatRaster` | wide tables and raster bands are scenarios; `conc_real` defines the grid |
 | Population (`pop_total`) | data.frame, CSV, Excel, GeoTIFF | aggregated onto the concentration grid with the total preserved |
 | Age structure (`age_struc`) | data.frame, CSV, Excel | one row per domain and age group, proportion in `prop`; renormalised within each domain |
-| Mortality (`mort_rate`) | data.frame, CSV, Excel | deaths per 100,000, per domain, age group and endpoint |
+| mortality (`mort_rate`) | data.frame, CSV, Excel | deaths per 100,000, per domain, age group and endpoint |
 | Boundaries (`admin`) | shapefile path, `sf` object, `NULL` | rasterized onto the grid; `NULL` means no domain column, except on a raster run with a domain `mort_lvl`, which uses `rnaturalearth` national boundaries |
 
 Column names are matched heuristically when they are not already canonical
@@ -205,14 +185,12 @@ Column names are matched heuristically when they are not already canonical
 
 | Function | Purpose |
 |---|---|
-| `Mortality()` | attributable deaths per scenario, per grid cell or per domain — domain aggregation and the uncertainty range are arguments (`aggregate`, `aggregate_by`, `uncertain`, `conc_uncert`) |
+| `mortality()` | attributable deaths per scenario, per grid cell or per domain — domain aggregation and the uncertainty range are arguments (`aggregate`, `aggregate_by`, `uncertain`, `conc_uncert`) |
 | `build_grid_info()` | the analysis grid as a table (coordinates, domain labels, `res`/`ext`/`crs`/`n_cells`), reusable across scenarios and writable to `.rds`/`.csv`/`.xlsx` |
-| `domain_summary()` | the domain grain as a table: one row per domain with `conc_pwe`, `conc_mean`, `pop_total` and `n_cells`, built from the same alignment and boundary rasterization `Mortality()` runs |
-| `Decomposition()` | driving-factor decomposition (24 permutations of population growth, ageing, exposure and other risk factors) |
+| `decompose()` | driving-factor decomposition (24 permutations of population growth, ageing, exposure and other risk factors) |
 | `aggregate_mortality()`, `aggregate_ci()` | aggregate a result by domain and by endpoint/age, keeping MEAN/UP/LOW side by side |
-| `getConc()`, `getPop()`, `getAge()`, `getMort()` | pull one scenario out of a wide table |
 | `cr_config()` | the C-R model configuration: which lookup table a model uses, its concentration column and its endpoint×age metadata; shipped as JSON and replaceable by path |
-| `RR_std()`, `cr_models()` | concentration-response lookup tables and the list of valid model names (from the config, aliases included) |
+| `rr_std()`, `cr_models()` | concentration-response lookup tables and the list of valid model names (from the config, aliases included) |
 | `build_cr_table()` | build a lookup table from published coefficients — the entry point for a pollutant or endpoint set the package does not ship |
 | `matchable()` | render a numeric key as a fixed-precision string |
 
@@ -230,7 +208,7 @@ Column names are matched heuristically when they are not already canonical
 
 ## Aggregation and uncertainty
 
-`Mortality(aggregate = "location")` sums the grid-level burdens within each
+`mortality(aggregate = "location")` sums the grid-level burdens within each
 domain -- the same calculation `aggregate_mortality()` performs -- keeps the
 `endpoint`/`age` breakdown selected by `aggregate_by`, and adds `conc_pwe`,
 the population-weighted concentration of the domain.
@@ -249,12 +227,31 @@ removed.
 `conc_uncert = 12` additionally re-runs the analysis with every concentration
 scaled by `1 +/- 12%` and widens the interval to cover that range too.
 
-## Decomposition
+## decompose
 
-`Decomposition()` walks the four drivers through all 24 orderings; each step
-differs from the previous one by exactly one driver, so `Mort_k - Mort_(k-1)`
-isolates that driver's contribution. `serie` 1..24 selects the ordering, in
-lexicographic order of `PG, PA, EXP, ORF` (the order documented in `?Decomposition`).
+`decompose()` compares **two groups of inputs** — two complete sets of
+`conc_real`, `pop_total`, `age_struc` and `mort_rate` — and returns one table
+per ordering of the four drivers, as a list of 24 named data frames:
+
+```r
+res <- decompose(
+  crf = "GEMM", calc_fild = grid_info, mort_lvl = "location",
+  from = list(conc_real = d15$conc, pop_total = d15$pop,
+              age_struc = d15$age, mort_rate = d15$mort),
+  to   = list(conc_real = d30$conc, pop_total = d30$pop,
+              age_struc = d30$age, mort_rate = d30$mort)
+)
+res[["PG-PA-EXP-ORF"]]     # one ordering: Start, PG, PA, EXP, ORF, End
+```
+
+Each step differs from the previous one by exactly one driver, so
+`step_k - step_(k-1)` isolates that driver's contribution. The orderings
+disagree by construction, so the order-independent reading is their mean:
+
+```r
+drivers <- c("PG", "PA", "EXP", "ORF")
+Reduce(`+`, lapply(res, function(x) x[drivers])) / length(res)
+```
 
 ## Supported concentration-response functions
 
@@ -265,7 +262,7 @@ concentration column and endpoint×age set — comes from
 `cr_config()`, the JSON configuration shipped in `inst/extdata/cr_models.json`
 and replaceable with `cr_config = "<path>"`; `NO2` is all-cause, so its
 `mort_rate` endpoint is `allcause`. Any other pollutant/endpoint combination
-can be passed to `Mortality(CRF = <data.frame>)` as long as it has the columns
+can be passed to `mortality(crf = <data.frame>)` as long as it has the columns
 `conc`, `endpoint`, `age`, `RR`.
 
 ## Methodology references

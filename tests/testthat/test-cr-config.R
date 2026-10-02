@@ -34,9 +34,10 @@ describe("cr_config()", {
     expect_equal(lri$name, "lri")
     expect_equal(lri$ages, "0")
 
-    f <- .cfg_with_model(
-      '{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": {"from": 25, "to": 35}}]}'
-    )
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": {"from": 25, "to": 35}}]}'
+    ))
     expect_equal(cr_config(f)$models$X$endpoints[[1]]$ages,
                  c("25", "30", "35"))
   })
@@ -56,11 +57,11 @@ describe("cr_config()", {
     expect_error(AttrMort:::.cr_model_entry(cfg, "nope"), "Unknown CR model")
   })
 
-  it("describes exactly the endpoints and ages RR_std() produces", {
+  it("describes exactly the endpoints and ages rr_std() produces", {
     cfg <- cr_config()
     for (model in cr_models(cfg)) {
       entry <- AttrMort:::.cr_model_entry(cfg, model)
-      produced <- unique(RR_std(model, "MEAN")[, c("endpoint", "age")])
+      produced <- unique(rr_std(model, "MEAN")[, c("endpoint", "age")])
       declared <- do.call(rbind, lapply(entry$endpoints, function(ep) {
         data.frame(endpoint = tolower(ep$name), age = ep$ages,
                    stringsAsFactors = FALSE)
@@ -101,14 +102,16 @@ describe("cr_config() validation", {
     )
     expect_error(cr_config(f), "unknown field")
 
-    f <- .cfg_with_model(
-      '{"lookup": {"kind": "rda", "table": "T", "bogus": 1}, "endpoints": [{"name": "x", "ages": [1]}]}'
-    )
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T", "bogus": 1}, ',
+      '"endpoints": [{"name": "x", "ages": [1]}]}'
+    ))
     expect_error(cr_config(f), "unknown field")
 
-    f <- .cfg_with_model(
-      '{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": [1], "bogus": 1}]}'
-    )
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": [1], "bogus": 1}]}'
+    ))
     expect_error(cr_config(f), "unknown field")
   })
 
@@ -121,7 +124,9 @@ describe("cr_config() validation", {
   })
 
   it("rejects bad lookup specifications", {
-    f <- .cfg_with_model('{"lookup": {"kind": "parquet"}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    f <- .cfg_with_model(
+      '{"lookup": {"kind": "parquet"}, "endpoints": [{"name": "x", "ages": [1]}]}'
+    )
     expect_error(cr_config(f), "kind")
 
     f <- .cfg_with_model('{"lookup": {"kind": "rda"}, "endpoints": [{"name": "x", "ages": [1]}]}')
@@ -132,13 +137,22 @@ describe("cr_config() validation", {
   })
 
   it("rejects bad ages", {
-    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": [30, 25]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": [30, 25]}]}'
+    ))
     expect_error(cr_config(f), "strictly increasing")
 
-    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": ["a"]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": ["a"]}]}'
+    ))
     expect_error(cr_config(f), "numeric")
 
-    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": {"from": 25, "to": 90, "by": 10}}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": {"from": 25, "to": 90, "by": 10}}]}'
+    ))
     expect_error(cr_config(f), "exact multiple")
   })
 
@@ -153,25 +167,38 @@ describe("cr_config() validation", {
     ))
     expect_error(cr_config(f), "already in use")
 
-    f <- .cfg_with_model(
-      '{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": [1]}, {"name": "X", "ages": [2]}]}'
-    )
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": [1]}, {"name": "X", "ages": [2]}]}'
+    ))
     expect_error(cr_config(f), "duplicate endpoint")
   })
 
   it("reports the offending field path", {
-    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T"}, "endpoints": [{"name": "x", "ages": [30, 25]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T"}, ',
+      '"endpoints": [{"name": "x", "ages": [30, 25]}]}'
+    ))
     expect_error(cr_config(f), "models.X.endpoints\\[1\\].ages")
   })
 
   it("rejects bad sheets and duplicate aliases", {
-    f <- .cfg_with_model('{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"MEAN": 1}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"MEAN": 1}}, ',
+      '"endpoints": [{"name": "x", "ages": [1]}]}'
+    ))
     expect_error(cr_config(f), "sheets")
 
-    f <- .cfg_with_model('{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"NOPE": "S"}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "xlsx", "path": "x.xlsx", "sheets": {"NOPE": "S"}}, ',
+      '"endpoints": [{"name": "x", "ages": [1]}]}'
+    ))
     expect_error(cr_config(f), "unknown branch")
 
-    f <- .cfg_with_model('{"lookup": {"kind": "rda", "table": "T", "sheets": {"MEAN": "S"}}, "endpoints": [{"name": "x", "ages": [1]}]}')
+    f <- .cfg_with_model(paste0(
+      '{"lookup": {"kind": "rda", "table": "T", "sheets": {"MEAN": "S"}}, ',
+      '"endpoints": [{"name": "x", "ages": [1]}]}'
+    ))
     expect_error(cr_config(f), "only used for xlsx/csv")
 
     f <- .write_cfg(c(
@@ -196,7 +223,7 @@ describe("lookup coverage", {
       ' "endpoints": [{"name": "xyz", "ages": [25, 30]}]}',
       '}}'
     ))
-    expect_error(RR_std("BAD", config = f), "no columns for endpoint")
+    expect_error(rr_std("BAD", config = f), "no columns for endpoint")
   })
 
   it("carries the nearest previous age forward when a later age has no column", {
@@ -218,7 +245,7 @@ describe("lookup coverage", {
     # Legacy semantics, pinned by the GEMM 85/90/95 columns: age 30 inherits
     # age 25. The lookup-coverage check only requires an anchor (first age or
     # `_ALL`), and the NA guard catches a lookup with no anchor at all.
-    out <- RR_std("HOLED", config = f)
+    out <- rr_std("HOLED", config = f)
     expect_equal(out$RR[out$conc == "10" & out$age == "30"], 1.1)
     expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.2)
   })
@@ -240,7 +267,7 @@ describe("lookup coverage", {
       ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
       '}}'
     ), f)
-    expect_error(RR_std("SPLIT", config = f), "share the same columns")
+    expect_error(rr_std("SPLIT", config = f), "share the same columns")
   })
 })
 
@@ -292,14 +319,14 @@ describe("custom models from file lookups", {
     .write_custom_lookup(dir)
     cfg <- cr_config(.custom_config(dir))
 
-    out <- RR_std("MYX", "MEAN", config = cfg)
+    out <- rr_std("MYX", "MEAN", config = cfg)
     expect_equal(names(out), c("conc", "endpoint", "age", "RR"))
     expect_equal(unique(out$endpoint), "ihd")
     expect_equal(sort(unique(out$age)), c("25", "30"))
     expect_equal(out$RR[out$conc == "10" & out$age == "25"], 1.10)
     expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.40)
 
-    up <- RR_std("MYX", "UP", config = cfg)
+    up <- rr_std("MYX", "UP", config = cfg)
     expect_equal(up$RR[up$conc == "10" & up$age == "25"], 1.15)
   })
 
@@ -309,12 +336,12 @@ describe("custom models from file lookups", {
     .write_custom_lookup(dir)
     cfg <- cr_config(.custom_config(dir, kind = "csv"))
 
-    out <- RR_std("MYX", "MEAN", config = cfg)
+    out <- rr_std("MYX", "MEAN", config = cfg)
     expect_equal(nrow(out), 4)
     expect_equal(out$RR[out$conc == "20" & out$age == "30"], 1.40)
   })
 
-  it("runs through Mortality() with cr_config =", {
+  it("runs through mortality() with cr_config =", {
     dir <- file.path(tempdir(), "attrmort-cr-run")
     unlink(dir, recursive = TRUE); dir.create(dir, recursive = TRUE)
     .write_custom_lookup(dir)
@@ -326,8 +353,8 @@ describe("custom models from file lookups", {
       location = "A", age = c("25", "30"), endpoint = "ihd",
       mortrate = c(1000, 2000)
     )
-    out <- Mortality(
-      CRF = "MYX", cr_config = cfg_path, calc_fild = d$calc_fild,
+    out <- mortality(
+      crf = "MYX", cr_config = cfg_path, calc_fild = d$calc_fild,
       conc_real = d$conc_real, pop_total = d$pop_total,
       age_struc = d$age_struc, mort_rate = d$mort_rate,
       mort_lvl = "location", validate = "off"
@@ -344,7 +371,7 @@ describe("custom models from file lookups", {
     bad_sheet <- .custom_config(
       dir, sheets = ', "sheets": {"MEAN": "NOPE", "LOW": "LOW", "UP": "UP"}'
     )
-    expect_error(RR_std("MYX", config = bad_sheet))
+    expect_error(rr_std("MYX", config = bad_sheet))
 
     bad_path <- file.path(dir, "bad_path.json")
     writeLines(c(
@@ -353,7 +380,7 @@ describe("custom models from file lookups", {
       ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
       '}}'
     ), bad_path)
-    expect_error(RR_std("MYX", config = bad_path), "not found")
+    expect_error(rr_std("MYX", config = bad_path), "not found")
 
     no_conc <- file.path(dir, "no_conc.json")
     writeLines(c(
@@ -363,6 +390,6 @@ describe("custom models from file lookups", {
       ' "endpoints": [{"name": "ihd", "ages": [25]}]}',
       '}}'
     ), no_conc)
-    expect_error(RR_std("MYX", config = no_conc), "nope")
+    expect_error(rr_std("MYX", config = no_conc), "nope")
   })
 })

@@ -33,5 +33,5 @@ names(cfg$models)
 str(cfg$models$NO2, max.level = 1)
 }
 \seealso{
-[cr_models()], [RR_std()]
+[cr_models()], [rr_std()]
 }

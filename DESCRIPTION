@@ -23,9 +23,10 @@ LazyDataCompression: xz
 Depends: 
     R (>= 4.1)
 Imports: 
-    dplyr,
+    cli,
+    dplyr (>= 1.1.0),
     jsonlite,
-    purrr,
+    purrr (>= 1.0.0),
     readr,
     readxl,
     rlang,
