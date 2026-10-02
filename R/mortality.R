@@ -155,7 +155,17 @@
 .grain_message <- function(calc_fild, mort_lvl, mort_rate, res = NA_real_) {
   n     <- nrow(calc_fild)
   dcol  <- .domain_col_of(calc_fild, mort_lvl)
-  ndom  <- if (is.null(dcol)) NA_integer_ else length(unique(calc_fild[[dcol]]))
+  # A cell without a label is not a domain. Counting the NA as one made a
+  # single-country window read as three domains (LAO: 2155 labelled + 4544
+  # unlabelled cells), which is exactly the user this line is for.
+  labs  <- if (is.null(dcol)) NULL else calc_fild[[dcol]]
+  n_na  <- if (is.null(labs)) 0L else sum(is.na(labs))
+  ndom  <- if (is.null(labs)) NA_integer_ else length(unique(labs[!is.na(labs)]))
+  unlabelled_txt <- if (n_na > 0) {
+    str_c(" (", format(n_na, big.mark = ","), " cell(s) carry no domain label)")
+  } else {
+    ""
+  }
   # One row per domain: PWRR has nothing to average over, it *is* the
   # relative risk at that row's concentration.
   domain_grain <- !is.null(dcol) && n == ndom
@@ -168,7 +178,7 @@
     } else {
       ""
     }
-    paste0(n, " cell(s) in ", ndom, " domain(s)", res_txt)
+    paste0(n, " cell(s) in ", ndom, " domain(s)", res_txt, unlabelled_txt)
   } else {
     paste0(n, " cell(s) with no domain column")
   }
@@ -836,6 +846,47 @@ mortality <- function(
   )
 }
 
+# `.widen_mort()` on a frame whose identity is the analysis grid.
+#
+# `pivot_wider()` treats every column other than `endpoint`, `age` and
+# `attr_mort` as an id column, so a column an input carries beyond the join key
+# decides the row identity instead of filling it: the result gains one row per
+# distinct combination, each carrying only its own endpoint, and `sum()` over it
+# is NA. One row per cell is what the grid and domain branches promise -- and
+# `.calc_attributable_ages()` joins the blocks on those keys -- so the violated
+# shape is refused here rather than returned. This is the same class of input as
+# a `mort_rate` the caller did not narrow: `validate_mortality_input()` has
+# already named the columns, this is the backstop that keeps them out.
+.widen_mort_checked <- function(x, calc_fild) {
+  wide <- .widen_mort(x)
+  if (nrow(wide) <= nrow(calc_fild)) {
+    return(wide)
+  }
+
+  id_cols <- setdiff(names(x), c("endpoint", "age", "attr_mort"))
+  # `conc` is a legitimate id column of the uncalibrated branch (the per-cell
+  # exposure of `.attributable_grid()`), so only the rest is suspicious.
+  extra   <- setdiff(id_cols, c(names(calc_fild), "conc"))
+  # Interpolated as values, never as text: a column name may contain braces,
+  # and cli does not re-parse what a `{...}` expression returns.
+  n_wide    <- nrow(wide)
+  n_cells   <- nrow(calc_fild)
+  extra_txt <- if (length(extra) == 0L) {
+    "none: the join itself multiplied the rows"
+  } else {
+    paste0("`", extra, "`", collapse = ", ")
+  }
+  .abort(paste0(
+    "The wide result has {n_wide} row(s) for {n_cells} cell(s) of `calc_fild`: ",
+    "a column outside the join key became an identity column of the pivot, so ",
+    "the result is one row per distinct combination instead of one row per ",
+    "cell and every value column that combination never computed is NA.\n",
+    "  column(s) outside the join key: {extra_txt}\n",
+    "  Keep one row per key: pass the join key(s), `age`, `endpoint` and ",
+    "`mortrate` only, or name the intended value column with `scenario=`."
+  ))
+}
+
 # The CR table and its label. `.calc_attributable_ages()` passes both down so a
 # chunked run does not rebuild the same lookup per age block; the defaults keep
 # the kernel usable on its own.
@@ -964,7 +1015,7 @@ mortality <- function(
     reduce(.left_join_common) |>
     mutate(mort_base = pop * prop * mortrate, .keep = "unused") |>
     mutate(attr_mort = mort_base * (RR - 1) / RR / .PER_100K, .keep = "unused") |>
-    .widen_mort()
+    .widen_mort_checked(calc_fild)
 }
 
 # Branch 2 -- `mort_lvl` names a column of `mort_rate`: the domain is the
@@ -980,7 +1031,7 @@ mortality <- function(
     drop_na() |>
     mutate(mort_base = pop * prop * mortrate, .keep = "unused") |>
     mutate(attr_mort = mort_base * (RR - 1) / PWRR / .PER_100K, .keep = "unused") |>
-    .widen_mort()
+    .widen_mort_checked(calc_fild)
 }
 
 # Branch 3 -- `mort_lvl` is not a column of `mort_rate`: the whole field is one

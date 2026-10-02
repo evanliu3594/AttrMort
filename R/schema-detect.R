@@ -98,25 +98,51 @@ detect_columns <- function(data,
   result
 }
 
+# The skeleton columns a table actually shares with `calc_fild`. When the caller
+# does not say (`mortality()` does; a direct call and `decompose()` do not), the
+# documented domain aliases the preparation step leaves behind are used; a table
+# that carries none of them is keyed on whatever non-value columns it has, which
+# is what keeps a legitimate custom domain column out of the "extra" report.
+.input_key_cols <- function(ds, key_cols = NULL) {
+  if (is.null(key_cols)) {
+    hits <- intersect(names(ds), c("location", "x", "y", "lon", "lat"))
+    if (length(hits) == 0L) {
+      hits <- setdiff(names(ds), c("conc", "pop", "age", "endpoint", "prop",
+                                   "mortrate"))
+    }
+    return(hits)
+  }
+  intersect(names(ds), key_cols)
+}
+
 # The `mort_rate` columns a calculation joins a cell on: `endpoint` and `age`
 # are the CRF axes, the rest are the columns `mort_rate` shares with the
 # skeleton (a domain column, or coordinates).
 #
 # `mortality()` passes the skeleton's own column names, which is the exact
-# answer. A caller that does not (a direct call to this validator, or
-# `decompose()`, which prepares two groups) gets the documented domain aliases
-# the preparation step leaves behind -- and, when the table carries none of
-# them (a domain column called `NAME` or `iso_a3`), every non-value column it
-# does carry. Guessing too narrowly would flag legitimate keys as duplicates.
+# answer; a caller that does not gets `.input_key_cols()`'s fallback. Guessing
+# too narrowly would flag legitimate keys as duplicates.
 .mort_key_cols <- function(mort, key_cols = NULL) {
-  if (is.null(key_cols)) {
-    key_cols <- intersect(names(mort), c("location", "x", "y", "lon", "lat"))
-    if (length(key_cols) == 0L) {
-      key_cols <- setdiff(names(mort), "mortrate")
-    }
-  }
-  intersect(names(mort), unique(c(key_cols, "endpoint", "age")))
+  intersect(names(mort),
+            unique(c(.input_key_cols(mort, key_cols), "endpoint", "age")))
 }
+
+# The value columns of each input, as `mortality()` prepares them: what an input
+# is *for*. Anything else it carries is payload.
+.INPUT_VALUE_COLS <- list(
+  conc      = "conc",
+  pop       = "pop",
+  age_struc = c("age", "prop"),
+  mort_rate = c("age", "endpoint", "mortrate")
+)
+
+# The age keys a CR model declares, as the character keys the tables join on
+# (`.cr_ages()` has already normalised every endpoint's range or vector).
+.crf_age_keys <- function(entry) {
+  ages <- unlist(map(entry$endpoints, "ages"), use.names = FALSE)
+  as.character(sort(unique(as.numeric(ages))))
+}
+
 
 # Duplicated keys in `mort_rate`, summarised for the report: how many keys, how
 # many rows, a couple of example keys, and the columns outside the key that
@@ -259,6 +285,54 @@ validate_mortality_input <- function(data_list,
       }
     }
 
+    # The model resolves once and serves both remaining checks.
+    entry <- NULL
+    if (!is.na(cr_model) && nzchar(cr_model)) {
+      entry <- tryCatch(
+        .cr_model_entry(.as_cr_config(config), cr_model),
+        error = function(e) NULL
+      )
+    }
+
+    # Each CRF carries a curve only for the strata it lists. A stratum the
+    # caller supplies that the model does not cover can only produce an empty
+    # join, so the result covers fewer strata than the inputs do -- and that is
+    # invisible in the result. Name the strata and what share of the age
+    # structure they carry. Only standard strata: a label the CRF cannot use at
+    # all is the previous check's business.
+    if (length(age_col) > 0 && !is.null(entry)) {
+      covered   <- .crf_age_keys(entry)
+      supplied  <- intersect(unique(.standardize_age_key(mort[[age_col[1]]])),
+                             .STD_AGE_GROUPS)
+      uncovered <- setdiff(supplied, covered)
+      if (length(uncovered) > 0) {
+        share_txt <- ""
+        age_df <- data_list[["age_struc"]]
+        if (is.data.frame(age_df) && all(c("age", "prop") %in% names(age_df))) {
+          prop  <- suppressWarnings(as.numeric(age_df$prop))
+          key   <- .standardize_age_key(age_df$age)
+          total <- sum(prop, na.rm = TRUE)
+          share <- if (is.finite(total) && total > 0) {
+            sum(prop[key %in% uncovered], na.rm = TRUE) / total
+          } else {
+            NA_real_
+          }
+          if (is.finite(share)) {
+            share_txt <- str_c(" and carry ", sprintf("%.1f%%", 100 * share),
+                               " of `age_struc`'s `prop`")
+          }
+        }
+        warnf(paste0(
+          "mort_rate: %s age stratum(s) have no curve for the model `%s` (%s)%s; ",
+          "those rows are dropped by the join and contribute nothing. ",
+          "The CRF covers %s."
+        ),
+        format(length(uncovered), big.mark = ","), cr_model,
+        paste(uncovered, collapse = ", "), share_txt,
+        paste(covered, collapse = ", "))
+      }
+    }
+
     # A repeated key is a broken input, not a data pattern: the join fans the
     # skeleton out and the wide result stops meaning one row per cell.
     value_label <- if (length(rate_col) > 0L) rate_col[1] else "mortrate"
@@ -284,53 +358,92 @@ validate_mortality_input <- function(data_list,
       })
     }
 
-    cause_col <- intersect(c("cause", "endpoint"), mort_cols)
-    if (length(cause_col) > 0 && !is.na(cr_model) && nzchar(cr_model)) {
-      entry <- tryCatch(
-        .cr_model_entry(.as_cr_config(config), cr_model),
-        error = function(e) NULL
+    # The calculation lower-cases the literal `endpoint` column
+    # (`.standardize_join_keys()`), so that is the column this report has to
+    # describe; `cause` is only a fallback for a caller that hands the validator
+    # a table directly. Both present is ambiguous input: say so, because one of
+    # them is silently unused.
+    cause_col <- intersect(c("endpoint", "cause"), mort_cols)
+    if (all(c("cause", "endpoint") %in% mort_cols)) {
+      warnf(paste0(
+        "mort_rate: the table carries both `cause` and `endpoint`; the ",
+        "calculation reads `endpoint` and keeps `cause` as a payload column of ",
+        "the wide result. Keep one of them."
+      ))
+    }
+    if (length(cause_col) > 0 && !is.null(entry)) {
+      expected_ep <- map_chr(entry$endpoints, "name")
+      # `held` keeps the caller's own spelling for the message, `actual` is
+      # what the join will compare -- the endpoints are matched as strings.
+      held   <- unique(as.character(mort[[cause_col[1]]]))
+      actual <- unique(tolower(held))
+      absent <- setdiff(expected_ep, actual)
+      extra  <- setdiff(actual, expected_ep)
+
+      held_txt <- paste(head(held, 20), collapse = ", ")
+      hint_txt <- str_c(
+        "AttrMort does not translate disease names: rename the values in `",
+        cause_col[1], "` to the CRF spelling."
       )
-      if (!is.null(entry)) {
-        expected_ep <- map_chr(entry$endpoints, "name")
-        # `held` keeps the caller's own spelling for the message, `actual` is
-        # what the join will compare -- the endpoints are matched as strings.
-        held   <- unique(as.character(mort[[cause_col[1]]]))
-        actual <- unique(tolower(held))
-        absent <- setdiff(expected_ep, actual)
-        extra  <- setdiff(actual, expected_ep)
 
-        held_txt <- paste(head(held, 20), collapse = ", ")
-        hint_txt <- str_c(
-          "AttrMort does not translate disease names: rename the values in `",
-          cause_col[1], "` to the CRF spelling."
-        )
-
-        if (length(absent) == length(expected_ep)) {
-          blockf(paste0(
-            "mort_rate: none of the endpoints the model `%s` needs (%s) is ",
-            "present in `%s`.\n  `%s` holds: %s\n  %s"
-          ), cr_model, paste(expected_ep, collapse = ", "), cause_col[1],
-          cause_col[1], held_txt, hint_txt)
-        } else if (length(absent) > 0) {
-          warnf(paste0(
-            "mort_rate: %s of the %s endpoint(s) the model `%s` needs are ",
-            "absent from `%s` (%s); those strata cannot be computed.\n",
-            "  `%s` holds: %s\n  %s"
-          ), length(absent), length(expected_ep), cr_model, cause_col[1],
-          paste(absent, collapse = ", "), cause_col[1], held_txt, hint_txt)
-        }
-        if (length(extra) > 0) {
-          extra_held <- head(held[tolower(held) %in% extra], 20)
-          cli::cli_inform(str_c(
-            "mort_rate: {length(extra)} endpoint value(s) in `{cause_col[1]}` are ",
-            "not used by {cr_model} ({paste(extra_held, collapse = \", \")}); they ",
-            "will not contribute to the result. If they name a disease the model ",
-            "covers, rename them to the CRF spelling -- AttrMort does not ",
-            "translate disease names."
-          ))
-        }
+      if (length(absent) == length(expected_ep)) {
+        blockf(paste0(
+          "mort_rate: none of the endpoints the model `%s` needs (%s) is ",
+          "present in `%s`.\n  `%s` holds: %s\n  %s"
+        ), cr_model, paste(expected_ep, collapse = ", "), cause_col[1],
+        cause_col[1], held_txt, hint_txt)
+      } else if (length(absent) > 0) {
+        warnf(paste0(
+          "mort_rate: %s of the %s endpoint(s) the model `%s` needs are ",
+          "absent from `%s` (%s); those strata cannot be computed.\n",
+          "  `%s` holds: %s\n  %s"
+        ), length(absent), length(expected_ep), cr_model, cause_col[1],
+        paste(absent, collapse = ", "), cause_col[1], held_txt, hint_txt)
+      }
+      if (length(extra) > 0) {
+        extra_held <- head(held[tolower(held) %in% extra], 20)
+        cli::cli_inform(str_c(
+          "mort_rate: {length(extra)} endpoint value(s) in `{cause_col[1]}` are ",
+          "not used by {cr_model} ({paste(extra_held, collapse = \", \")}); they ",
+          "will not contribute to the result. If they name a disease the model ",
+          "covers, rename them to the CRF spelling -- AttrMort does not ",
+          "translate disease names."
+        ))
       }
     }
+  }
+
+  # ── columns that are neither a key nor a value ─────────────────────
+  # `.widen_mort()` pivots on `(endpoint, age)` and keeps every other column of
+  # the joined frame as an identity column of the result. A column an input
+  # carries beyond the join key and its own value columns therefore decides the
+  # row identity instead of filling it: one row per distinct combination
+  # instead of one row per cell, NA wherever that combination was never
+  # computed, and `sum()` over the result is NA.
+  #
+  # This is what a `scenario = NULL` run keeps: only `scenario =` goes through
+  # the per-input slicers, which narrow a table to its canonical columns. Say
+  # which columns they are -- and the calculation refuses the polluted shape, so
+  # the report is where the fix is explained.
+  for (nm in names(.INPUT_VALUE_COLS)) {
+    ds <- data_list[[nm]]
+    if (is.null(ds)) {
+      next
+    }
+    extra <- setdiff(names(ds),
+                     c(.INPUT_VALUE_COLS[[nm]], .input_key_cols(ds, key_cols)))
+    if (length(extra) == 0L) {
+      next
+    }
+    warnf(paste0(
+      "%s: %s column(s) are neither a join key nor a value column (%s). Each one ",
+      "becomes an identity column of the wide result: one row per distinct ",
+      "combination instead of one row per cell, with NA in every value column ",
+      "that combination never computed. Keep only the key column(s) and %s."
+    ),
+    nm, format(length(extra), big.mark = ","),
+    paste0("`", extra, "`", collapse = ", "),
+    paste0("`", .INPUT_VALUE_COLS[[nm]], "`", collapse = ", "))
   }
 
   # ── age structure ──────────────────────────────────────────────────

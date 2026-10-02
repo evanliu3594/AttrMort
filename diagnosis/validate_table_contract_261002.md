@@ -320,7 +320,169 @@ mortality(crf = "MRBRT2021", calc_fild = cells, conc_real = conc, pop_total = po
 - `decompose()` 没有把 `calc_fild` 列名传进 `validate_mortality_input()`（它不在本线写域内），
   走的是 `.mort_key_cols()` 的退化分支：域别名一个都认不出时用该表全部非值列，因此
   `NAME` / `iso_a3` 这类自定义域列不会被误判成重复；但没有 `mortality()` 那条路径精确。
-- `age_struc` 在 `(域, 年龄)` 上重复时同样会扇出，本次**没有**加检查（工单只要求 `mort_rate`）。
+- `age_struc` 在（域，年龄）上重复时同样会扇出，本次**没有**加检查（工单只要求 `mort_rate`）。
   它是同一类缺陷，建议并入 Q1 之后的下一批。
 - F1 未修，所以"把原始 GBD 导出的路径直接交给 `mort_rate =`"这条最自然的用法目前仍是失败的；
   可用绕过方式：删掉 `*_id` 列，或把 `age_name` / `cause_name` / `location_name` 改名成规范列名。
+
+---
+
+# 第二轮：静默污染与误导性计数（261002 下午）
+
+> 工单来源：Lead 转 T3 的独立对账（`diagnosis/validate_numeric_anchors_261002.md` §七）。
+> 编号沿用 Lead 的 F1/F2/F5/F7（括号里是 T3 报告的编号）。
+> 一次提交；写域只有 `R/mortality.R`、`R/schema-detect.R`、
+> `tests/testthat/test-validate-contract.R`、`NEWS.md`——**没有**动
+> `R/prepare-inputs.R`（T1 写域）与 `R/raster-io.R`（T4 正在改）。
+
+## 八、F1（Blocker）：`scenario = NULL` 时多余列静默进入宽表
+
+### 根因（实测，不是推断）
+
+`.prepare_inputs()` 在 `scenario = NULL` 时走 `.extract_scenario()` 的 `canon()` 分支
+（`R/prepare-inputs.R:284-328`），它**只重命名值列、不调用 `.slice_mort()`**；
+`scenario =` 才会走逐输入切片器（`.slice_mort()` 的 `select()` 只留键列 + `age` + `endpoint` + 值列）。
+实测：91 行 × 11 列的输入进 `.prepare_inputs()` 后仍是 **91 行 × 11 列，一列没掉**。
+
+join 链（复刻 `.attributable_by_domain()` 的函数体逐步打印）：
+
+| 步骤 | 行 × 列 |
+|---|---|
+| `calc_fild` | 2 × 3 |
+| `+ conc_real` | 2 × 4 |
+| `+ pop_total` | 2 × 5 |
+| `+ RR_tbl` | 150 × 8 |
+| `+ mort_rate` | **150 × 16** |
+| `+ age_struc` | 150 × 17 |
+| `+ pwrr` | 150 × 18 |
+| `drop_na()` 之后（pivot 之前） | **10 × 13** |
+| `.widen_mort()` 之后 | **10 × 15**（值列 5，NA 40/50） |
+
+`mort_rate` 的 join 键实测只有 `endpoint, age`；150 行 = 2 格 × 5 端点 × 15 个 RR 年龄层，
+**是查表的正常扇出，join 没有多乘一行**。
+
+真正的乘法在 `.widen_mort()`：`pivot_wider(names_from = c("endpoint", "age"))` 把
+**除 `endpoint`/`age`/`attr_mort` 之外的每一列都当 id 列**。本例 `age_struc` 只有 age 60，
+join 后每格剩 5 行（5 个端点），而 `cause_name`/`upper`/`lower` 每行各不相同
+→ 每行各自成为一个独立 id 组合 → **每格 5 行而不是 1 行**（2 格 → 10 行），
+每个 `{endpoint}_{age}` 只填自己那一个端点 → 40/50 为 NA，`sum()` = NA。
+
+结论：**不是 join 扇出，是 pivot 的隐式 id 列**；`names_from` 并没有多拿列。
+
+### 影响面
+
+`scenario = NULL` 是默认值。任何"保留原始列、只把值列命名成 `mortrate`/`mort_rate`/`rate`"的表
+都会踩中——GBD 导出经过一次改名就是这个形态。T3 的对照：
+
+| 输入 | 结果 | 值列 NA |
+|---|---|---|
+| 只留 4 个规范列 | 2 行 × 8 列 | 0 / 50，`sum()` = 13.38457 |
+| 原始 11 列 | **10 行 × 15 列** | **40 / 50，`sum()` = NA** |
+
+### 修复（只做加法，两处）
+
+1. **报告**：`validate_mortality_input()` 新增一节，对 `conc`/`pop`/`age_struc`/`mort_rate`
+   四个输入各查一次"**既不是 join 键、也不是值列**"的列，点名并说明它们会成为宽表的 id 列
+   （"one row per distinct combination instead of one row per cell"）。
+   **没有改取值逻辑**：哪个列是值列、`scenario=` 怎么选，一行没动。
+2. **拒绝**：计算核新增 `.widen_mort_checked()`（`R/mortality.R`），
+   `nrow(宽表) > nrow(calc_fild)` 即 `.abort`，并点名落在键外的列。
+   放在 `.attributable_grid()` / `.attributable_by_domain()` 的收口处，
+   `mortality()` 与 `decompose()` 都经过它——**实测 `decompose()` 同样被拒**
+   （同一份 payload 放进 `to` 组 → 同样的报错文本），所以不需要改 `R/decompose.R`。
+
+修后（T3 的 91 × 11 最小复现，`validate = "warn"`）：
+
+```
+[warn] mort_rate: 7 column(s) are neither a join key nor a value column (`upper`,
+`lower`, `metric_name`, `sex_name`, `year`, `cause_name`, `measure_name`). ...
+[warn] Analysis grain: 2 cell(s) in 1 domain(s); PWRR calibrated per domain.
+!! ERROR: The wide result has 10 row(s) for 2 cell(s) of `calc_fild`: a column
+   outside the join key became an identity column of the pivot, so the result is
+   one row per distinct combination instead of one row per cell and every value
+   column that combination never computed is NA.
+     column(s) outside the join key: `upper`, `lower`, `metric_name`, `sex_name`,
+   `year`, `cause_name`, `measure_name`
+     Keep one row per key: pass the join key(s), `age`, `endpoint` and
+   `mortrate` only, or name the intended value column with `scenario=`.
+```
+
+**边界（全部实测）**：
+
+| 情形 | 行为 |
+|---|---|
+| 4 列规范输入 | 数值一字不变（2 × 8，NA 0，`sum()` = 13.38457） |
+| 多余列在每一行同值（如 `note`） | 行数正确、无 NA：**只告警不拒**（T3 变体 1），结果会多带该列 |
+| 多余列在（端点，年龄）之间不同（`upper`/`lower`/`cause_name`） | **拒绝**，点名这些列 |
+| `validate = "off"` | 告警静默，但**拒绝仍然生效**（错误不是"报告"） |
+| `decompose()` | 同一内核，同样拒绝 |
+
+钉子：91 × 11 那个最小复现现在得到明确报错，不再返回 `sum()` = NA 的表。
+
+## 九、F2（Must-fix）：校验读 `cause`，计算核读 `endpoint`
+
+- 校验侧 `R/schema-detect.R` 取 `intersect(c("cause", "endpoint"))[1]`（**`cause` 优先**）；
+  计算侧 `.standardize_join_keys()` 用字面 `endpoint`。两列并存时校验描述的是计算不用的那一列。
+- 修复：`intersect()` 顺序改为 `c("endpoint", "cause")`（优先计算核真正读的那列，`cause` 仅作
+  直接调用本函数时的退化），并新增一条告警把"两列并存"这件事本身报出来。
+- 实测：两列并存时不再出现"4 of the 5 endpoint(s) ... absent"这种假报；告警改为
+  "the table carries both `cause` and `endpoint`; the calculation reads `endpoint` and keeps
+  `cause` as a payload column ... Keep one of them."，随后被 F1 的拒绝拦下（`cause` 是键外列），
+  用户拿到的是"留一个"的明确指引，而不是一个静默丢掉 `cause` 的结果。
+
+## 十、F5（Info）：`Analysis grain` 把 NA 计成一个域
+
+`.grain_message()` 原来用 `length(unique(calc_fild[[dcol]]))`，`unique()` 保留 `NA`，
+于是 LAO 窗口（2155 个有标签 + 4544 个无标签）读作两个域。
+现在域数排除 `NA`，并在其后补计数。数值不变，只是读数不再被误导。
+
+```
+修后：Analysis grain: 5 cell(s) in 1 domain(s) (2 cell(s) carry no domain label); PWRR calibrated per domain.
+全有标签时逐字不变：Analysis grain: 3 cell(s) in 1 domain(s); PWRR calibrated per domain.
+```
+
+## 十一、F7（Info）：CRF 不覆盖的年龄层静默丢弃
+
+- 现状：`validate_mortality_input()` 的年龄检查只比"标准 20 层"
+  （`"age_struc: 19 standard age group(s) absent"`），不检查"**表里有、CRF 没有**"的那些层。
+- 修复：新增一条告警，列出这类分层、它们在 `age_struc$prop` 里的占比、以及 CRF 覆盖的分层。
+  只对标准 5 岁分层生效（无法归一的标签由第一轮那条告警负责，两条不重复）。
+  **不动计算、不加列、不动口径。**
+- 实测（真实 GBD 2021 人口表，2019 年，5COD）：
+
+```
+ROU: 5 age stratum(s) have no curve for the model `5COD` (15, 20, 0, 5, 10) and carry
+     26.4% of `age_struc`'s `prop`; ... The CRF covers 25, 30, ..., 95.
+LAO: 同五层，carry 51.1%
+```
+
+与 T3 独立算出的 **26.41% / 51.07%** 一致（同一张表、同一批五层）。
+
+## 十二、门槛与回归（第二轮）
+
+```
+$ $env:ATTRMORT_FINGERPRINTS=1; Rscript -e "devtools::test('D:/GitDir/AttrMort', filter='fingerprints', reporter='summary')"
+fingerprints: ..........................................      （42 项，exit 0，不漂移）
+
+$ Rscript -e "devtools::test('D:/GitDir/AttrMort', reporter='summary')"
+aggregate ... build-cr ... cr-config ... decompose ... fingerprints: S... grid-info ...
+grid-path ... mortality ... prepare-inputs ... raster-io ... review-fixes ... rr_std ...
+schema-detect ... uncertainty ... utils ... validate-contract ... validate-ingest ...
+validate-numeric ... validate-pop-conservation ...
+══ Skipped ═══ 1.（指纹，预期）   ══ DONE ══   （exit 0）
+```
+
+全量测试里包含 T4 的 `validate-pop-conservation` 与 T3 的 `validate-numeric`，
+都在 T4 正在修改的 `R/raster-io.R`（工作区未提交）之上跑通——**没有因它们失败的用例**。
+
+新增断言：`test-validate-contract.R` 从 37 条增至 57 条（F1 报告 / F1 拒绝 / F1 控制组 /
+F2 列选择 /  grain 计数 / CRF 未覆盖分层）。
+
+## 十三、本轮不做、只留档（Lead 指定）
+
+| 编号 | 事项 | 位置 | 为什么不做 |
+|---|---|---|---|
+| F4（T3 F4） | 单波段栅格的 NA 格被静默丢弃，网格随之缩小（`nrow(calc_fild)` 5600 → 5563，`build_grid_info()$n_cells` 同步变小，而 `ext`/`res` 仍描述整幅栅格） | `R/raster-io.R:75` `filter(grid, n_na == 0)` | 属网格口径：哪些格进分析网格是 T1/用户的口径决定；已有文档约定待补 |
+| F6（T3 F7） | 域归属法则是 `touches`（格方块与多边形相交），不是格心 | `.attach_admin()` / `sf::st_intersects` | 属口径，且是既有文档约定；建议写进 `admin=` 的文档 |
+| F8（T3 F8） | ROU 曝光窗口 37/5600 格恰为 `-999`（黑海海面，人口与域标签都是 0） | 调用方数据 | 数值影响为零（掩与不掩总死亡逐位相同 18,607.852794）；`validate = "stop"` 下会中止，属 T1 的填充值口径 |
+

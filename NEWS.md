@@ -272,6 +272,39 @@ table) to `mortality()`; see `diagnosis/validate_table_contract_261002.md`.
   covered that cause alone, while the other five specific causes the model has
   a curve for carried 69.8% of the burden.
 
+### Silent wide-table pollution and misleading counts (261002, batch 2)
+
+Found by the independent reconciliation against the real GBD and raster runs;
+see `diagnosis/validate_table_contract_261002.md` from section 八 onwards.
+
+* An input that keeps columns beyond its join key and value columns no longer
+  reaches the wide result. `pivot_wider()` treats every column other than
+  `endpoint`, `age` and the value as an id column, so a `mort_rate` that still
+  carries `upper`, `lower`, `year` or `cause_name` produced one output row per
+  distinct combination instead of one row per cell: a two-cell run came back with
+  ten rows, 40 of its 50 value cells NA and `sum()` on it NA, with no error and
+  no warning. `scenario = NULL` is the default and the per-input slicers only run
+  for `scenario =`, so this was the ordinary path for a table that had been
+  through one rename. The validator now names those columns, and the calculation
+  refuses the shape (`.widen_mort_checked()`) with the offending columns listed
+  and the fix spelled out. `mortality()` and `decompose()` share the kernel, so
+  both are covered. A payload column that is constant per key is only reported:
+  the numbers stay right and the extra column stays in the result.
+* The endpoint report reads the column the calculation reads. With both `cause`
+  and `endpoint` present it described `cause`, which the kernel does not use, so
+  a complete table was reported as missing four of its five endpoints; it now
+  reads `endpoint`, and the coexistence itself is reported.
+* The `Analysis grain:` line no longer counts cells without a domain label as a
+  domain. A single-country window (2155 labelled cells beside 4544 unlabelled
+  ones) read as two domains; the count excludes the unlabelled cells and says how
+  many there are. Runs where every cell is labelled print the same line as before.
+* Strata the CRF has no curve for are reported with what they carry. A caller who
+  supplies all twenty 5-year strata to a model defined on 25-95 gets a result
+  covering fifteen of them and, until now, nothing said which five were dropped:
+  against the real age structures those strata hold 51.1% of Lao PDR's
+  population and 26.4% of Romania's. The warning lists the strata, their share of
+  `age_struc$prop`, and the strata the CRF does cover.
+
 ## New features
 
 * `mortality()` accepts a raster-only call: when `conc_real` is a raster (a

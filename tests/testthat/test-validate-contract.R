@@ -44,6 +44,36 @@
   c("<5 years", paste0(lower[-1], "-", lower[-1] + 4, " years"), "95+ years")
 }
 
+# Two cells in one domain with all five 5COD endpoints at one stratum -- the
+# shape whose wide result has one `{endpoint}_{age}` column per endpoint.
+.five_endpoint_inputs <- function() {
+  fld  <- data.frame(x = c("0", "1"), y = c("0", "0"), location = "A")
+  endpoints <- c("copd", "ihd", "lc", "lri", "stroke")
+  list(
+    calc_fild = fld,
+    conc_real = data.frame(x = c("0", "1"), y = c("0", "0"), conc = c(20, 40)),
+    pop_total = data.frame(x = c("0", "1"), y = c("0", "0"), pop = c(1000, 2000)),
+    age_struc = data.frame(location = "A", age = "60", prop = 1),
+    mort_rate = data.frame(
+      location = "A", age = "60", endpoint = endpoints,
+      mortrate = c(100, 200, 30, 40, 250)
+    )
+  )
+}
+
+# The same table with a column that is one-to-one with `endpoint` and is not
+# part of the join key: the column that turns the wide result into one row per
+# cause instead of one row per cell.
+.five_endpoint_with_payload <- function() {
+  d <- .five_endpoint_inputs()
+  d$mort_rate$cause_name <- c(
+    copd = "Chronic obstructive pulmonary disease", ihd = "Ischemic heart disease",
+    lc = "Tracheal, bronchus, and lung cancer",
+    lri = "Lower respiratory infections", stroke = "Stroke"
+  )[d$mort_rate$endpoint]
+  d
+}
+
 describe("mort_rate key uniqueness", {
   it("blocks a key that appears more than once", {
     d <- .attr_small_long()
@@ -220,5 +250,111 @@ describe("endpoint messages", {
     expect_match(res$warn, "ihd", all = FALSE)
     expect_match(res$warn, "not translate disease names", all = FALSE)
     expect_match(res$info, "Ischemic heart disease", all = FALSE)
+  })
+
+  it("reads the endpoint column the calculation reads", {
+    d <- .attr_small_long()
+    # both spellings present: the kernel lower-cases `endpoint`, so `cause` is
+    # not the column to report on
+    d$mort_rate <- data.frame(
+      location = "A", age = c("25", "30"), endpoint = "ncd+lri",
+      cause = c("Ischemic heart disease", "Stroke"),
+      mortrate = c(1000, 2000)
+    )
+    res <- .validate_report(.contract_inputs(d$mort_rate), cr_model = "GEMM")
+
+    expect_true(res$report$valid)
+    expect_false(any(grepl("none of the endpoints", res$report$blocking)))
+    expect_false(any(grepl("needs are absent", res$warn)))
+    expect_match(res$warn, "carries both `cause` and `endpoint`", all = FALSE)
+  })
+})
+
+describe("columns that are neither a key nor a value", {
+  it("is reported before it can reach the wide result", {
+    d <- .attr_small_long()
+    d$mort_rate$year       <- 2019L
+    d$mort_rate$metric_name <- "Rate"
+    res <- .validate_report(.contract_inputs(d$mort_rate), cr_model = "GEMM")
+
+    expect_true(res$report$valid)          # a report, not a stop
+    expect_match(res$warn, "identity column", all = FALSE)
+    expect_match(res$warn, "`year`", all = FALSE)
+    expect_match(res$warn, "`metric_name`", all = FALSE)
+  })
+
+  it("stays quiet for the canonical tables", {
+    res <- .validate_report(.contract_inputs(), cr_model = "GEMM")
+
+    expect_false(any(grepl("identity column", res$warn)))
+  })
+
+  it("refuses a wide result that is one row per combination, not per cell", {
+    d <- .five_endpoint_inputs()
+    run <- function(mort, validate = "off") {
+      mortality(crf = "5COD", calc_fild = d$calc_fild, conc_real = d$conc_real,
+                pop_total = d$pop_total, age_struc = d$age_struc,
+                mort_rate = mort, mort_lvl = "location", validate = validate)
+    }
+
+    expect_error(run(.five_endpoint_with_payload()$mort_rate),
+                 "row\\(s\\) for .* cells?\\(s\\)")
+    expect_error(run(.five_endpoint_with_payload()$mort_rate),
+                 "cause_name")
+
+    # the same table without the payload is one row per cell and has no NA
+    ok <- run(d$mort_rate)
+    expect_equal(nrow(ok), nrow(d$calc_fild))
+    expect_false(anyNA(ok[, setdiff(names(ok), c("x", "y", "location"))]))
+  })
+})
+
+describe("the analysis grain line", {
+  it("does not count cells without a domain label as a domain", {
+    fld <- data.frame(x = c("0", "1", "2"), y = "0",
+                      location = c("A", "B", NA))
+    msg <- AttrMort:::.grain_message(fld, "location",
+                                     data.frame(location = c("A", "B")))
+
+    expect_match(msg, "2 domain\\(s\\)")
+    expect_match(msg, "1 cell\\(s\\) carry no domain label")
+  })
+
+  it("is unchanged when every cell has a label", {
+    fld <- data.frame(x = c("0", "1"), y = "0", location = c("A", "A"))
+    msg <- AttrMort:::.grain_message(fld, "location", data.frame(location = "A"))
+
+    expect_equal(
+      msg,
+      paste0("Analysis grain: 2 cell(s) in 1 domain(s); ",
+             "PWRR calibrated per domain.")
+    )
+  })
+})
+
+describe("strata the CRF has no curve for", {
+  it("reports them with the share of the age structure they carry", {
+    ages <- as.character(seq(0, 95, 5))
+    d <- .attr_small_long()
+    d$age_struc  <- data.frame(location = "A", age = ages, prop = 1 / 20)
+    d$mort_rate  <- data.frame(location = "A", age = c("0", "25", "60"),
+                               endpoint = "ncd+lri", mortrate = c(10, 1000, 5000))
+
+    res <- .validate_report(
+      list(conc = d$conc_real, pop = d$pop_total, age_struc = d$age_struc,
+           mort_rate = d$mort_rate),
+      cr_model = "GEMM"
+    )
+
+    expect_match(res$warn, "no curve for", all = FALSE)
+    expect_match(res$warn, "5\\.0%", all = FALSE)   # one stratum of twenty
+    expect_true(res$report$valid)
+  })
+
+  it("stays quiet when the CRF covers every stratum supplied", {
+    d <- .attr_small_long()   # ages 25 and 30, both inside GEMM's 25-95
+    res <- .validate_report(.contract_inputs(), cr_model = "GEMM")
+
+    expect_false(any(grepl("no curve for", res$warn)))
   })
 })
