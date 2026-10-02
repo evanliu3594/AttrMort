@@ -301,6 +301,16 @@ matchable <- function(num, dgt = 2) {
 # join, said explicitly: dplyr otherwise prints one "Joining with `by = ...`"
 # message per call, which buries the run's own output (a real run printed more
 # than a hundred of them).
-.left_join_common <- function(x, y) {
-  left_join(x, y, by = intersect(names(x), names(y)))
+#
+# What goes through here is a grid or domain skeleton paired with one table per
+# input, and the supporting tables legitimately fan a skeleton row out: a cell
+# takes one `RR` per endpoint and age from the lookup, and `mort_rate` /
+# `age_struc` copy a domain's rows onto every cell of that domain. That is the
+# calculation, not an accident, so the relationship is declared -- otherwise
+# dplyr's "unexpected many-to-many" warning fires on every calibrated run. The
+# supporting tables are one row per key by construction (`rr_std()` renders one
+# row per concentration, endpoint and age); the fan-out's row count is pinned in
+# `tests/testthat/test-utils.R`.
+.left_join_common <- function(x, y, relationship = "many-to-many") {
+  left_join(x, y, by = intersect(names(x), names(y)), relationship = relationship)
 }

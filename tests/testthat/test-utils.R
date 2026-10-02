@@ -112,3 +112,26 @@ describe(".slice_pop() / .slice_age() / .slice_mort()", {
     expect_equal(out$pop, 1e5)
   })
 })
+
+describe(".left_join_common()", {
+  it("declares the stratum fan-out instead of warning about it", {
+    skeleton <- data.frame(x = c("0", "1"), y = c("0", "0"),
+                           conc = c("5.0", "5.0"))
+    lookup <- data.frame(conc = "5.0", endpoint = c("a", "b"),
+                         RR = c(1.1, 1.2))
+
+    expect_no_warning(out <- .left_join_common(skeleton, lookup))
+    expect_equal(names(out), c("x", "y", "conc", "endpoint", "RR"))
+    expect_equal(nrow(out), 4L)
+  })
+
+  it("still reports a relationship the caller declares itself", {
+    skeleton <- data.frame(conc = c("5.0", "5.0"))
+    lookup <- data.frame(conc = c("5.0", "6.0"), RR = c(1.1, 1.2))
+
+    expect_error(
+      .left_join_common(skeleton, lookup, relationship = "one-to-one"),
+      class = "dplyr_error_join_relationship_one_to_one"
+    )
+  })
+})

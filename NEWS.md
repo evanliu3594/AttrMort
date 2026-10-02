@@ -199,6 +199,12 @@
 * `decompose(serie = 2.5)` used to be accepted and truncated to the second
   ordering; `serie` is now checked to be a whole number, which is what the
   error message has always said. Non-integers are an error from here on.
+* The internal joins that align the grid with the lookup and the domain tables
+  no longer report dplyr's "unexpected many-to-many relationship" warning. The
+  fan-out is the calculation -- one row per cell, endpoint and age, with the
+  lookup supplying the risk and `mort_rate`/`age_struc` copying a domain's rows
+  onto its cells -- so the relationship is declared instead of left to dplyr.
+  No number changes; a calibrated run's output is just clean again.
 
 ## New features
 
