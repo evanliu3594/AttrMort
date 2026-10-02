@@ -23,17 +23,26 @@
 | 15:21:05 | tarball 生成（`AttrMort_0.3.0.tar.gz`，8,882,404 B） | 文件 mtime |
 | 15:23:44 | `f1dee26 docs(diagnosis): 规模与性能验证报告…`，**只动 `diagnosis/validate_scale_perf_261002.md`（1 file changed, 511 insertions）** | `git show --stat f1dee26` |
 | 15:2x | 三项门槛先后完成 | 见第二节 |
+| 稍后 | `a20d736 docs(diagnosis): 真实数据校验的任务书、判定队列与 Lead 独立复核`，**只动 `diagnosis/validate_real_data_scope_261002.md`（1 file changed, 122 insertions）** | `git show --stat a20d736` |
 
-**判定：没有任何门槛被作废。** 依据两条，都可复核：
+**判定：没有任何门槛被作废。** 依据三条，都可复核：
 
-1. `f1dee26` 只改 `diagnosis/`，而 `.Rbuildignore` 含 `^diagnosis$` —— 我实测 `tar -tf AttrMort_0.3.0.tar.gz` 里 `diagnosis` 与 `validate-data` 的条目数均为 **0**，故该提交在原理上无法改变构建产物。
-2. 代码面 MD5 前后逐位相同（15:20 记录 vs 门槛跑完后复取）：
+1. `f1dee26` 与 `a20d736` 都只改 `diagnosis/`，而 `.Rbuildignore` 含 `^diagnosis$` —— 我实测 `tar -tf AttrMort_0.3.0.tar.gz` 里 `diagnosis` 与 `validate-data` 的条目数均为 **0**，故这两个提交在原理上无法改变构建产物。
+2. **自冻结代码面以来，包内一个文件都没被改过**（这条是最直接的证明，跑在收官时刻）：
 
-| 文件 | MD5（15:20 与门槛结束后一致） |
+   ```powershell
+   git diff --stat 96b762d HEAD -- . ':(exclude)diagnosis'   # 输出为空
+   ```
+
+3. 代码面 MD5 前后逐位相同（15:20 记录 vs 门槛跑完后复取，收官时刻再次复核仍相同）：
+
+| 文件 | MD5（15:20 记录、门槛结束后、收官时刻三次一致） |
 |---|---|
 | `R/raster-io.R` | `2E85A19C48D86241CBF6A96D99655AAD` |
 | `R/prepare-inputs.R` | `B550F5F803A17B2773BC31C7845B05B3` |
 | `R/mortality.R` | `9C47EF63189B7F0D2610BB67AF9BDD18` |
+| `R/schema-detect.R` | `70B0C866BBDCF0199E66A9AA034ADD68` |
+| `R/ingest.R` | `A5287B9780973B999F79F49C782442F5` |
 
 ### 交接简报里两条已被推翻的说法（供留档）
 
