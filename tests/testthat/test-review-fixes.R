@@ -112,16 +112,23 @@ describe("B2: the uncertainty range is matched by key", {
     # chain cannot compute it at all
     d$conc_real$conc <- c("250", "290")
 
-    out <- NULL
-    expect_warning(
-      out <- suppressMessages(mortality(
+    # `validate = "warn"`: the run reports how many cells have no interval.
+    # The data validation also warns about the fixture, so the warnings are
+    # collected rather than matched one by one.
+    warns <- character(0)
+    out <- withCallingHandlers(
+      suppressMessages(mortality(
         crf = "GEMM", calc_fild = d$calc_fild, conc_real = d$conc_real,
         pop_total = d$pop_total, age_struc = d$age_struc,
-        mort_rate = d$mort_rate, mort_lvl = "location", validate = "off",
+        mort_rate = d$mort_rate, mort_lvl = "location", validate = "warn",
         uncertain = TRUE, conc_uncert = 20
       )),
-      "have no interval"
+      warning = function(w) {
+        warns <<- c(warns, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
     )
+    expect_true(any(grepl("have no interval", warns)))
 
     expect_equal(nrow(out), 4L)          # every grid cell is still there
     expect_true(anyNA(out$CI_UP))        # the ones no chain could compute

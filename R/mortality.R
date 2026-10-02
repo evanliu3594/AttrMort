@@ -458,7 +458,7 @@ mortality <- function(
   if (!is.null(aggregate)) {
     at <- .aggregate_keys(aggregate, mort_lvl)
     return(.aggregate_result(grid, calc_fild, conc_real, pop_total, at,
-                             aggregate_by, key_cols, ranges))
+                             aggregate_by, key_cols, ranges, warn = !quiet))
   }
 
   if (uncertain) {
@@ -466,9 +466,11 @@ mortality <- function(
     # is what keeps a chain that lost a cell from shifting the others.
     keys_frame  <- grid[key_cols]
     grid$CI_LOW <- .range_sum(ranges$lower, key_cols, "low",
-                              aggregate = FALSE, keys_frame = keys_frame)
+                              aggregate = FALSE, keys_frame = keys_frame,
+                              warn = !quiet)
     grid$CI_UP  <- .range_sum(ranges$upper, key_cols, "up",
-                              aggregate = FALSE, keys_frame = keys_frame)
+                              aggregate = FALSE, keys_frame = keys_frame,
+                              warn = !quiet)
   }
   grid
 }
@@ -545,7 +547,7 @@ mortality <- function(
 # The `aggregate = ` path: one row per group, that group's population-weighted
 # exposure, and the range when one was asked for.
 .aggregate_result <- function(grid, calc_fild, conc_real, pop_total, at,
-                              aggregate_by, key_cols, ranges) {
+                              aggregate_by, key_cols, ranges, warn = TRUE) {
   missing_cols <- setdiff(at, names(grid))
   if (length(missing_cols) > 0) {
     missing_txt <- paste(missing_cols, collapse = ", ")
@@ -569,7 +571,7 @@ mortality <- function(
   if (is.null(ranges)) {
     return(out)
   }
-  .attach_range(out, ranges$lower, ranges$upper, at)
+  .attach_range(out, ranges$lower, ranges$upper, at, warn = warn)
 }
 
 # ── age chunking ────────────────────────────────────────────────────────

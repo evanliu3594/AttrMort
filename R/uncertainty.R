@@ -46,7 +46,7 @@
 # Collapse several per-cell totals into one side of the range, either per
 # cell (aggregate = FALSE) or summed within the aggregation keys.
 .range_sum <- function(frames, keys, side = c("low", "up"), aggregate = TRUE,
-                        keys_frame = NULL) {
+                        keys_frame = NULL, warn = TRUE) {
   side <- match.arg(side)
   pick_fn <- if (side == "low") pmin else pmax
 
@@ -74,7 +74,7 @@
   # A cell no chain could compute is reported rather than filled in: the
   # interval is undefined there, not equal to another cell's.
   holes <- sum(is.na(totals))
-  if (holes > 0) {
+  if (holes > 0 && warn) {
     cli::cli_warn(str_c(
       holes, " cell(s) have no interval: at least one chain could not compute ",
       "them (a concentration outside the C-R lookup, or data the chain does ",
@@ -105,11 +105,11 @@
 
 # Attach CI_LOW / CI_UP to an aggregated result. `group_keys` are the columns
 # the result was aggregated on; an empty vector means the whole field.
-.attach_range <- function(out, lower, upper, group_keys) {
+.attach_range <- function(out, lower, upper, group_keys, warn = TRUE) {
   # No baseline is passed: the chains are grid-level while `out` is already
   # aggregated, so the key space to align on is theirs.
-  lo <- .range_sum(lower, group_keys, "low") |> rename(CI_LOW = .total)
-  hi <- .range_sum(upper, group_keys, "up") |> rename(CI_UP = .total)
+  lo <- .range_sum(lower, group_keys, "low", warn = warn) |> rename(CI_LOW = .total)
+  hi <- .range_sum(upper, group_keys, "up", warn = warn) |> rename(CI_UP = .total)
 
   if (length(group_keys) == 0) {
     out$CI_LOW <- lo$CI_LOW
