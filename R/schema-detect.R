@@ -98,19 +98,93 @@ detect_columns <- function(data,
   result
 }
 
+# The `mort_rate` columns a calculation joins a cell on: `endpoint` and `age`
+# are the CRF axes, the rest are the columns `mort_rate` shares with the
+# skeleton (a domain column, or coordinates).
+#
+# `mortality()` passes the skeleton's own column names, which is the exact
+# answer. A caller that does not (a direct call to this validator, or
+# `decompose()`, which prepares two groups) gets the documented domain aliases
+# the preparation step leaves behind -- and, when the table carries none of
+# them (a domain column called `NAME` or `iso_a3`), every non-value column it
+# does carry. Guessing too narrowly would flag legitimate keys as duplicates.
+.mort_key_cols <- function(mort, key_cols = NULL) {
+  if (is.null(key_cols)) {
+    key_cols <- intersect(names(mort), c("location", "x", "y", "lon", "lat"))
+    if (length(key_cols) == 0L) {
+      key_cols <- setdiff(names(mort), "mortrate")
+    }
+  }
+  intersect(names(mort), unique(c(key_cols, "endpoint", "age")))
+}
+
+# Duplicated keys in `mort_rate`, summarised for the report: how many keys, how
+# many rows, a couple of example keys, and the columns outside the key that
+# vary inside a duplicated key -- which is what the caller has to filter on.
+# The value column is not one of them: it varying is the symptom, not the
+# thing to filter on.
+#
+# A duplicated key is never a legitimate input. `.left_join_common()` copies
+# the skeleton onto every duplicate, so the wide result either grows a row per
+# duplicate or -- when the duplicates agree on every key -- collapses into
+# list-columns and the run dies much later with `invalid 'type' (list) of
+# argument`. The usual cause is a table that keeps a year / sex / scenario
+# column: GBD publishes one row per (location, age, cause) *per year*.
+.duplicate_key_problem <- function(mort, key_cols = NULL, value_cols = NULL) {
+  key_cols <- .mort_key_cols(mort, key_cols)
+  if (length(key_cols) < 2L || nrow(mort) == 0L) {
+    return(NULL)
+  }
+
+  key      <- do.call(paste, c(lapply(mort[key_cols], as.character),
+                              list(sep = "\r")))
+  repeated <- duplicated(key) | duplicated(key, fromLast = TRUE)
+  if (!any(repeated)) {
+    return(NULL)
+  }
+
+  bad_rows <- mort[repeated, , drop = FALSE]
+  bad_key  <- key[repeated]
+  extra    <- setdiff(names(mort), c(key_cols, value_cols))
+  varying  <- extra[vapply(extra, function(col) {
+    any(vapply(split(bad_rows[[col]], bad_key),
+               function(v) length(unique(v)) > 1L, logical(1)))
+  }, logical(1))]
+
+  first  <- bad_rows[!duplicated(bad_key), key_cols, drop = FALSE]
+  first  <- head(first, 3L)
+  sample <- map_chr(seq_len(nrow(first)), function(i) {
+    value <- vapply(first, function(col) as.character(col[[i]]), character(1))
+    str_c(names(first), " = ", value, collapse = ", ")
+  })
+
+  list(
+    n_keys  = length(unique(bad_key)),
+    n_rows  = sum(repeated),
+    sample  = sample,
+    varying = varying,
+    keys    = key_cols
+  )
+}
+
 # Validate the prepared inputs. Returns a report instead of throwing, so the
 # caller decides whether a problem is fatal (`validate = "stop"` in
 # mortality()).
 #
 # `blocking` collects the problems that must abort the calculation (missing
-# data, impossible values, a CRF whose endpoints are absent); `issues`
-# collects everything, including soft warnings.
+# data, impossible values, a CRF whose endpoints are absent, a `mort_rate`
+# whose keys repeat); `issues` collects everything, including soft warnings.
+#
+# `key_cols` is the set of columns the skeleton (`calc_fild`) joins on; the
+# key-uniqueness check joins it with `endpoint` and `age` to get the key a
+# `mort_rate` row has to be unique on.
 validate_mortality_input <- function(data_list,
                                      cr_model      = NA_character_,
                                      age_tolerance = 0.01,
                                      max_rate      = 5e4,
                                      dgt_conc      = 1,
-                                     config        = NULL) {
+                                     config        = NULL,
+                                     key_cols      = NULL) {
   state <- new.env(parent = emptyenv())
   state$issues   <- character(0)
   state$blocking <- character(0)
@@ -164,6 +238,52 @@ validate_mortality_input <- function(data_list,
       }
     }
 
+    # Age keys join the CRF's strata as characters. A value that names no
+    # stratum can only produce an empty join, and until now it did so quietly:
+    # the rows disappeared between the inputs and the lookup. Say which values
+    # they are, so a mislabelled age column is visible before it costs rows.
+    age_col <- intersect(c("age", "age_group", "agegroup"), mort_cols)
+    if (length(age_col) > 0) {
+      stray <- setdiff(unique(.standardize_age_key(mort[[age_col[1]]])),
+                       .STD_AGE_GROUPS)
+      if (length(stray) > 0) {
+        warnf(paste0(
+          "mort_rate: %s age value(s) are not a standard 5-year stratum (%s); ",
+          "unless the CRF defines them, those rows are dropped by the join ",
+          "and contribute nothing. The CRF keys are the lower bound of each ",
+          "stratum: %s."
+        ),
+        format(length(stray), big.mark = ","),
+        paste(head(sort(stray), 8), collapse = ", "),
+        paste(.STD_AGE_GROUPS, collapse = ", "))
+      }
+    }
+
+    # A repeated key is a broken input, not a data pattern: the join fans the
+    # skeleton out and the wide result stops meaning one row per cell.
+    value_label <- if (length(rate_col) > 0L) rate_col[1] else "mortrate"
+    dup <- .duplicate_key_problem(mort, key_cols, value_cols = rate_col)
+    if (!is.null(dup)) {
+      blockf(paste0(
+        "mort_rate: %s duplicated key(s) over (%s): %s row(s) share a key ",
+        "with another row.\n",
+        "  example key(s): %s\n",
+        "  column(s) that differ inside a duplicated key: %s\n",
+        "  `mort_rate` must hold one row per key: filter the table to a ",
+        "single year / sex / scenario first."
+      ),
+      format(dup$n_keys, big.mark = ","),
+      paste(dup$keys, collapse = ", "),
+      format(dup$n_rows, big.mark = ","),
+      paste(dup$sample, collapse = " | "),
+      if (length(dup$varying) == 0L) {
+        str_c("none (the rows differ only in `", value_label,
+              "`: the table carries several values per key)")
+      } else {
+        paste0("`", dup$varying, "`", collapse = ", ")
+      })
+    }
+
     cause_col <- intersect(c("cause", "endpoint"), mort_cols)
     if (length(cause_col) > 0 && !is.na(cr_model) && nzchar(cr_model)) {
       entry <- tryCatch(
@@ -171,25 +291,43 @@ validate_mortality_input <- function(data_list,
         error = function(e) NULL
       )
       if (!is.null(entry)) {
-        actual   <- unique(tolower(as.character(mort[[cause_col[1]]])))
         expected_ep <- map_chr(entry$endpoints, "name")
+        # `held` keeps the caller's own spelling for the message, `actual` is
+        # what the join will compare -- the endpoints are matched as strings.
+        held   <- unique(as.character(mort[[cause_col[1]]]))
+        actual <- unique(tolower(held))
         absent <- setdiff(expected_ep, actual)
         extra  <- setdiff(actual, expected_ep)
 
+        held_txt <- paste(head(held, 20), collapse = ", ")
+        hint_txt <- str_c(
+          "AttrMort does not translate disease names: rename the values in `",
+          cause_col[1], "` to the CRF spelling."
+        )
+
         if (length(absent) == length(expected_ep)) {
-          blockf("mort_rate: none of the endpoints used by %s (%s) are present",
-                 cr_model, paste(expected_ep, collapse = ", "))
+          blockf(paste0(
+            "mort_rate: none of the endpoints the model `%s` needs (%s) is ",
+            "present in `%s`.\n  `%s` holds: %s\n  %s"
+          ), cr_model, paste(expected_ep, collapse = ", "), cause_col[1],
+          cause_col[1], held_txt, hint_txt)
         } else if (length(absent) > 0) {
-          warnf("mort_rate: endpoint(s) used by %s but absent: %s",
-                cr_model, paste(absent, collapse = ", "))
+          warnf(paste0(
+            "mort_rate: %s of the %s endpoint(s) the model `%s` needs are ",
+            "absent from `%s` (%s); those strata cannot be computed.\n",
+            "  `%s` holds: %s\n  %s"
+          ), length(absent), length(expected_ep), cr_model, cause_col[1],
+          paste(absent, collapse = ", "), cause_col[1], held_txt, hint_txt)
         }
         if (length(extra) > 0) {
-          cli::cli_inform(
-            str_c(
-              "mort_rate: {length(extra)} endpoint(s) are not used by {cr_model} ",
-              "({paste(extra, collapse = \", \")}); they will not contribute to the result."
-            )
-          )
+          extra_held <- head(held[tolower(held) %in% extra], 20)
+          cli::cli_inform(str_c(
+            "mort_rate: {length(extra)} endpoint value(s) in `{cause_col[1]}` are ",
+            "not used by {cr_model} ({paste(extra_held, collapse = \", \")}); they ",
+            "will not contribute to the result. If they name a disease the model ",
+            "covers, rename them to the CRF spelling -- AttrMort does not ",
+            "translate disease names."
+          ))
         }
       }
     }
@@ -203,7 +341,9 @@ validate_mortality_input <- function(data_list,
     loc_col  <- detect_columns(age_df, schema = "location", quiet = TRUE)
 
     if (length(age_col) > 0) {
-      actual_ages  <- unique(as.character(age_df[[age_col[1]]]))
+      # The same key the calculation will join on: labels such as
+      # "15-19 years" are the stratum "15" there, so they are one here too.
+      actual_ages  <- unique(.standardize_age_key(age_df[[age_col[1]]]))
       missing_ages <- setdiff(.STD_AGE_GROUPS, actual_ages)
       extra_ages   <- setdiff(actual_ages, .STD_AGE_GROUPS)
       if (length(missing_ages) > 0) {

@@ -232,6 +232,46 @@ arc-sec population GeoTIFF); see `diagnosis/validate_raster_ingest_261002.md`.
   a raster reached that check with its keys already rendered as character and
   was skipped. No cells are dropped by the new report, and no value changes.
 
+### Table-side contract on real GBD tables (261002)
+
+Found by feeding the three real IHME GBD exports (two 90,576-row Deaths/Rate
+tables over 204 locations, 8 `cause_name` and 20 `age_name`; one Population
+table) to `mortality()`; see `diagnosis/validate_table_contract_261002.md`.
+
+* A `mort_rate` whose keys repeat is now **refused** instead of fanned out. GBD
+  publishes one row per `(location, age, cause)` *per year*, and with the year
+  column dropped on the way in the three rows are identical on the key:
+  `.left_join_common()` copied the skeleton onto all of them, `pivot_wider()`
+  turned every `{endpoint}_{age}` column into a list-column, and the run died
+  much later in `sum()` with `invalid 'type' (list) of argument`. When the year
+  column was still there it became an id column instead, and a two-cell
+  `calc_fild` came back with six rows. `validate_mortality_input()` reports the
+  duplicated keys over `(domain, endpoint, age)` -- key count, row count, an
+  example key, and the columns that vary inside a duplicated key -- and
+  `validate = "stop"` aborts with it. `validate = "off"` still says nothing.
+* Age columns published as labels now join the lookup. `.standardize_age_key()`
+  translates a 5-year *stratum label* to the stratum it names -- `"<5 years"`
+  to `"0"`, `"15-19 years"` to `"15"`, `"95+ years"` to `"95"` -- which is how
+  GBD writes all twenty of its age groups and how every one of the 90,576 rows
+  in an export used to pass through unmapped. A plain `"25"` or `25` is
+  untouched, and so is a label that names no stratum (`"All ages"`,
+  `"Age-standardized"`, a single-year `"1 year"`). The age-structure
+  completeness check uses the same translation, so a labelled structure is no
+  longer reported as non-standard.
+* `mort_rate` age values that name no standard stratum are now reported instead
+  of disappearing into the join. A mixed age column used to lose rows with no
+  diagnostic at all: in the GBD slice measured here two keyed strata out of
+  twenty survived and the eighteen dropped ones carried 99.6% of the deaths.
+* The endpoint report says what to do with it. "none of the endpoints used by
+  ... are present" is now "none of the endpoints the model `X` needs (`copd`,
+  `ihd`, ...) is present in `endpoint`", followed by the values the table
+  actually holds and the statement that these are matched as strings and
+  disease names are not translated (`"Ischemic heart disease"` is not `ihd`).
+  The same two sides are listed when only some endpoints match, which is the
+  quiet case: against the real export one cause in eight joined and the result
+  covered that cause alone, while the other five specific causes the model has
+  a curve for carried 69.8% of the burden.
+
 ## New features
 
 * `mortality()` accepts a raster-only call: when `conc_real` is a raster (a

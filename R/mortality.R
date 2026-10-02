@@ -14,11 +14,45 @@
   mort_rate = c("age", "endpoint", "mortrate")
 )
 
+# Age labels that name a 5-year stratum without being its key: "<5 years",
+# "15-19 years", "95+ years" -- GBD spells every stratum this way. The lookup
+# tables only know the lower bound of each stratum, so a label passed through
+# unchanged can only produce an empty join.
+.AGE_LABEL_RANGE <- "^\\d+\\s*-\\s*\\d+\\s*(?:years?|yrs?)?$"
+.AGE_LABEL_OPEN  <- "^\\d+\\s*\\+\\s*(?:years?|yrs?)?$"
+.AGE_LABEL_UNDER <- "^(?:<|under\\s+)\\s*\\d"
+
+# The stratum key a published age label names, if it names one: "<5 years" and
+# its spellings are the first stratum, "15-19 years" and "95+ years" are their
+# own lower bound. Anything else is returned untouched -- a bare "25", and
+# labels that name no 5-year stratum at all ("All ages", "Age-standardized"),
+# behave exactly as they did before.
+.canonical_age_label <- function(x) {
+  out <- x
+
+  under <- str_detect(x, .AGE_LABEL_UNDER)
+  if (any(under)) {
+    out[under] <- "0"
+  }
+
+  for (pattern in c(.AGE_LABEL_RANGE, .AGE_LABEL_OPEN)) {
+    hit <- str_detect(x, pattern)
+    if (any(hit)) {
+      out[hit] <- str_extract(x[hit], "^\\d+")
+    }
+  }
+
+  out
+}
+
 # Age keys are joined as characters; numeric age columns are rounded to
 # whole years first so that user-supplied tables join against the lookup
 # tables regardless of how ages were stored.
 .standardize_age_key <- function(x) {
-  if (is.numeric(x)) matchable(x, dgt = 0) else as.character(x)
+  if (is.numeric(x)) {
+    return(matchable(x, dgt = 0))
+  }
+  .canonical_age_label(as.character(x))
 }
 
 # Every input must carry its value columns and share at least one join key
@@ -409,7 +443,8 @@ mortality <- function(
            mort_rate = mort_rate),
       cr_model = crf_name,
       dgt_conc = dgt_conc,
-      config   = config
+      config   = config,
+      key_cols = names(calc_fild)
     )
     if (!report$valid && validate == "stop") {
       issues_txt <- paste(report$issues, collapse = "\n  - ")
@@ -882,7 +917,10 @@ mortality <- function(
   .abort(paste0(
     "No shared disease endpoint between CRF \"{label_txt}\" and `mort_rate`.\n",
     "  CRF endpoints   : {ep_rr_txt}\n",
-    "  mort_rate values: {ep_mort_txt}"
+    "  mort_rate values: {ep_mort_txt}\n",
+    "  Rename the values in `mort_rate$endpoint` to one of the CRF endpoints ",
+    "above that the value stands for: AttrMort matches these strings, it does ",
+    "not translate disease names."
   ))
 }
 
