@@ -5,4 +5,5 @@
 ^R/AGENTS\.md$
 ^data-raw$
 ^diagnosis$
+^validate-data$
 ^\.github$
