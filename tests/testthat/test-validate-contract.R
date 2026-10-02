@@ -5,8 +5,7 @@
 # labels ("15-19 years") instead of the lookup's stratum keys ("15"), and
 # endpoint messages that list the CRF's names without saying what to do with
 # them. Every fixture here is synthetic -- the GBD files are not a test
-# dependency; the numbers they produced are in
-# `diagnosis/validate_table_contract_261002.md`.
+# dependency.
 
 # Run `validate_mortality_input()` and collect both the report and the warnings,
 # because most of these cases are about *what is said*, not only about `valid`.

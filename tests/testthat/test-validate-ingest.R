@@ -1,7 +1,7 @@
 # Ingest quality on the raster path -------------------------------------
 #
 # Two conditions the pipeline used to meet without a word, found on real
-# gridded data (`diagnosis/validate_raster_ingest_261002.md`):
+# gridded data:
 #
 #   * an *undeclared* fill / no-data value -- a netCDF or GeoTIFF that spells
 #     missing as -999 without a `_FillValue` / `missing_value` / `NAflag`.
