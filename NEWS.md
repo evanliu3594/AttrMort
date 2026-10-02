@@ -210,7 +210,7 @@
 
 Found by running the ingest layer against two real gridded products (a 0.1 deg
 netCDF exposure whose no-data cells are an *undeclared* `-999`, and a 30
-arc-sec population GeoTIFF); see `diagnosis/validate_raster_ingest_261002.md`.
+arc-sec population GeoTIFF).
 
 * A raster whose missing cells are an undeclared fill value (a `-999` with no
   `_FillValue` / `missing_value` / `NAflag`) now says so while it is read.
@@ -236,7 +236,7 @@ arc-sec population GeoTIFF); see `diagnosis/validate_raster_ingest_261002.md`.
 
 Found by feeding the three real IHME GBD exports (two 90,576-row Deaths/Rate
 tables over 204 locations, 8 `cause_name` and 20 `age_name`; one Population
-table) to `mortality()`; see `diagnosis/validate_table_contract_261002.md`.
+table) to `mortality()`.
 
 * A `mort_rate` whose keys repeat is now **refused** instead of fanned out. GBD
   publishes one row per `(location, age, cause)` *per year*, and with the year
@@ -274,8 +274,7 @@ table) to `mortality()`; see `diagnosis/validate_table_contract_261002.md`.
 
 ### Silent wide-table pollution and misleading counts (261002, batch 2)
 
-Found by the independent reconciliation against the real GBD and raster runs;
-see `diagnosis/validate_table_contract_261002.md` from section 八 onwards.
+Found by the independent reconciliation against the real GBD and raster runs.
 
 * An input that keeps columns beyond its join key and value columns no longer
   reaches the wide result. `pivot_wider()` treats every column other than
@@ -308,7 +307,7 @@ see `diagnosis/validate_table_contract_261002.md` from section 八 onwards.
 ### Population aggregation on real rasters (261002)
 
 Found by running a 9.33e8-cell 30 arc-sec population GeoTIFF against a 6,699-cell
-0.1 deg country window; see `diagnosis/validate_scale_perf_261002.md`.
+0.1 deg country window.
 
 * `.aggregate_pop()` no longer reports a windowed population total as a loss, and
   no longer reads the whole raster to serve a window. The conservation check
@@ -332,9 +331,8 @@ Found by running a 9.33e8-cell 30 arc-sec population GeoTIFF against a 6,699-cel
 
 ### A missing age label is passed through, not fatal (261002)
 
-Found by the independent verifier's counter-example sweep
-(`diagnosis/validate_verify_261002.md`), which the four acceptance gates do not
-reach: no assertion in the suite feeds a missing age.
+Found by an independent verifier's counter-example sweep, which the four
+acceptance gates do not reach: no assertion in the suite feeds a missing age.
 
 * Age labels are normalised to the lookup's stratum keys, and that normalisation
   aborted the whole run when an age was missing: `any(str_detect(x, pattern))`

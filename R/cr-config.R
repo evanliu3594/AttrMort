@@ -11,9 +11,9 @@
 # resolves its relative lookup paths against the config file's own directory,
 # never the working directory.
 #
-# Design: diagnosis/design_json_crf_migration_260930.md (section 3). The
-# config is metadata only -- the tables themselves stay in data/*.rda, and
-# nothing is ever written back.
+# Design reference: the JSON C-R migration design note (section 3), kept
+# outside the repository. The config is metadata only -- the tables themselves
+# stay in data/*.rda, and nothing is ever written back.
 
 .cr_schema_version <- 1L
 .cr_default_path <- function() {

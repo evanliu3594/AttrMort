@@ -12,7 +12,7 @@
 | `prepare-inputs.R` | **两个入口的共同前置模块**：`.prepare_inputs()`（唯一的入口，1 检查文件 → 2 栅格对齐 → 3 读表映射列 → 4 网格一致性 → 5 贴边界 → 6 取一列情景），私有阶段 `.map_input_columns()`、`.check_grid_match()`、`.default_national_admin()`、`.report_boundary_match()`，以及情景层 `.extract_scenario()` + 四个 `.slice_*()`；文件头的注释表列出全部 given-when-then 路由 |
 | `utils.R` | `matchable()`、`.resolve_key_cols()`、`.resolve_case_col()`、`.value_key_cols()`、`.pick_column()`、`.left_join_common()`、`.write_table_file()` |
 | `rr_std.R` | `.match_ci()`、`.match_cr_model()`、`.cr_lookup_load()`（rda/xlsx/csv 查表装载）、`rr_std()` |
-| `cr-config.R` | `cr_config()`、`cr_models()`、JSON 配置校验与 alias 解析（设计见 `diagnosis/design_json_crf_migration_260930.md`） |
+| `cr-config.R` | `cr_config()`、`cr_models()`、JSON 配置校验与 alias 解析（设计文档不进仓库，留档在原工作区） |
 | `schema-detect.R` | `.COLUMN_VARIANTS`、`.COLUMN_TARGET`、`detect_columns()`、`validate_mortality_input()` |
 | `raster-io.R` | `raster_to_grid()`、`align_to_target()`、`.aggregate_pop()`、`shapefile_to_grid()`、`.resolve_target_res()` |
 | `grid-info.R` | `build_grid_info()` —— 把分析网格显式化、可落盘；内部复用 raster-io/ingest 的对齐与栅格化，不另写一套 |
@@ -77,7 +77,7 @@ state(moved) × 16               按「已移动驱动集合」缓存的计算�
 - **值列解析（scenario 语义）**：`.resolve_case_col()`（`utils.R`）是 `pop`/`conc`/`prop`/`mortrate` 的唯一入口：`scenario=` 命中列名 > 规范列 > 唯一数值非键列（`message()` 说明用了哪列）> 报错列出候选。`scenario=` 只是逐输入列选择器，**不得**要求所有输入都带该列，也不得判断跨输入情景/年份一致性；`.extract_scenario(NULL)` 用 `strict = FALSE` 让 `.check_inputs()` 一次汇总所有问题。
 - **运行输出洁净**：内部 join 一律经 `.left_join_common()`（显式取 `intersect(names(x), names(y))` 为键），不得退回会打印 `Joining with ...` 的自然 join；`validate = "off"` 下除结果外不输出。该 helper 同时声明 `relationship = "many-to-many"`：骨架表（格/域）与查表、`mort_rate`、`age_struc` 的扇出是计算本身（每格每端点每年龄一行），不得改回默认而让 dplyr 的 many-to-many 告警淹没运行输出；扇出行数由 `tests/testthat/test-utils.R` 钉住。
 - **浓度键类型**：暴露数据与查表两侧都必须是字符、同为 `dgt_conc` 位。查表一律经 `rr_std()` 渲染，新模型必须登记进配置（`inst/extdata/cr_models.json`，`lookup` 指定表/文件与端点年龄），否则数值/字符不一致会在 join 处报错。内置查表的原始 `conc` 列也须是字符键（`tests/testthat/test-rr_std.R` 会比对原始对象）。
-- **查表年龄继承**：`rr_std()` 对缺列年龄按“继承前一个年龄”处理（从 `_ALL` 行开始）——GEMM 的 85/90/95 继承 80、MRBRT 的 `_ALL` 表全程继承 ALL，均由指纹钉住；装载校验要求每个端点至少存在“首个年龄列或 `_ALL` 列”（`R/rr_std.R` 的 `.cr_lookup_check()`）。改动该逻辑前先跑 39 表对照与指纹（见 `diagnosis/code_review_260930.md`）。
+- **查表年龄继承**：`rr_std()` 对缺列年龄按“继承前一个年龄”处理（从 `_ALL` 行开始）——GEMM 的 85/90/95 继承 80、MRBRT 的 `_ALL` 表全程继承 ALL，均由指纹钉住；装载校验要求每个端点至少存在“首个年龄列或 `_ALL` 列”（`R/rr_std.R` 的 `.cr_lookup_check()`）。改动该逻辑前先跑 39 表对照与指纹。
 - **多波段栅格掩膜**：多情景栅格必须共享同一有效掩膜；`raster_to_grid()` 只保留所有层都有值的格子，某格只在部分层有值时**必须告警**并说明各层缺测数，不得静默收窄网格。
 - **人口栅格聚合**：`.aggregate_pop()` 先 `terra::aggregate(fun = "sum")` 再 resample，并核对总量；不要退回 `terra::resample(method = "sum")`（不守恒）。
 - **分辨率交互**：`.resolve_target_res()` 在非交互会话不得调用 `readline()`；> 1e9 格直接拒绝；非方形栅格按 `c(res_x, res_y)` 保留，不得对两轴取均值（会给整张网格换分辨率）。
@@ -129,4 +129,4 @@ state(moved) × 16               按「已移动驱动集合」缓存的计算�
 2. **实例数据构建未进包**：把异构原始数据（netCDF/GeoTIFF 浓度、人口栅格、CSV/Excel 死亡率与年龄结构）整理成标准实例文件的流程，目前只有 `data-raw/make-example-data.R` 这份合成示例可作模板，尚无通用工具函数。
 3. **`aggregate_ci()` 与 `mortality(uncertain = TRUE)` 的边界**：前者要求调用方自带 `_MEAN/_UP/_LOW` 后缀，后者直接给区间；若将来让 `mortality()` 一次输出三支并加后缀，需明确两者分工。
 4. **独立误差口径**：若需要「每格误差独立」的抽样区间，可增加 `ci_method = "quadrature"`（现有 range 口径为共模假设）。
-5. **JSON C-R 配置迁移（P0–P3 已完成，P4 待做）**：内置 13 个模型名已由 `inst/extdata/cr_models.json` 驱动，`.CR_TABLE_REGISTRY`、`rr_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 已删除；自定义模型可经 `cr_config=` + xlsx/csv 查表接入并有端到端测试；NO<sub>2</sub> 端点按拍板改为 `allcause`（对应查表前缀 `cause`，指纹参照已更新、数值不变）。教程见 `vignettes/AttrMort.Rmd`；待做仅剩发布说明（`NEWS.md`/版本号按用户决定暂不动）。设计见 `diagnosis/design_json_crf_migration_260930.md`，完成后删除本条。
+5. **JSON C-R 配置迁移（P0–P3 已完成，P4 待做）**：内置 13 个模型名已由 `inst/extdata/cr_models.json` 驱动，`.CR_TABLE_REGISTRY`、`rr_std()` 的 reshape 分支与 `.CR_ENDPOINTS` 已删除；自定义模型可经 `cr_config=` + xlsx/csv 查表接入并有端到端测试；NO<sub>2</sub> 端点按拍板改为 `allcause`（对应查表前缀 `cause`，指纹参照已更新、数值不变）。教程见 `vignettes/AttrMort.Rmd`；待做仅剩发布说明（`NEWS.md`/版本号按用户决定暂不动）。设计文档不进仓库，完成后删除本条。

@@ -1,3 +1,9 @@
+# Keep line endings stable across platforms: the working tree gets CRLF on
+# Windows, the repository stores LF. Without this, `git status` reports every
+# edited file as modified after a checkout with a different core.autocrlf, and
+# a diff of an untouched file is noise.
+* text=auto
+
 *.R linguist-language=R
 *.rda linguist-language=R
 *.rds linguist-language=R

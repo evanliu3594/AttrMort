@@ -1,5 +1,5 @@
-# Regression tests for the review findings fixed in batches A and B
-# (diagnosis/plan_fixes_261001.md). Each one failed before its fix.
+# Regression tests for the review findings fixed in batches A and B.
+# Each one failed before its fix.
 
 describe("A1: data text is never evaluated as an expression", {
   it("shows an endpoint literally, braces and all", {
