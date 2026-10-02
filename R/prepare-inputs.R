@@ -15,6 +15,9 @@
 #                               reproject/resample them onto one lattice
 #                               (`.resolve_target_res()`, `align_to_target()`),
 #                               hand back a `template`
+#   2b. `.report_raster_fill()` negative cell values the raster reader did not
+#                               declare missing, reported and never cleaned
+#                               (`validate = "off"` silences it)
 #   3. `.map_input_columns()`   read every input and map its columns onto the
 #                               canonical schema (`.ingest_and_map()`)
 #   4. `.check_grid_match()`    a skeleton the user supplied must overlap the
@@ -40,6 +43,7 @@
   ~given,                       ~when,                                                      ~then,                                                           ~handler,
   "data.frame",                 "always",                                                   "used as it is",                                                 ".ingest_single_input",
   "character path",             "extension is a raster format",                             "raster_to_grid(): one row per cell",                            ".ingest_single_input",
+  "raster path",                "cell centres collide at `dgt_coord`",                      "warn: the key cannot express this grid, raise `dgt_coord`",     ".render_cell_keys",
   "character path",             "extension is .csv/.txt",                                   "readr::read_csv()",                                             ".ingest_single_input",
   "character path",             "extension is .xls/.xlsx",                                  "readxl::read_excel()",                                          ".ingest_single_input",
   "character path",             "any other extension",                                      "stop, listing the supported formats",                           ".ingest_single_input",
@@ -50,6 +54,7 @@
   "any raster input",           "target_res = NULL, non-interactive",                       "detected; auto-confirmed, reported or refused by cell count",   ".resolve_target_res",
   "any raster input",           "target_res = NULL, interactive",                           "menu of candidate resolutions",                                 ".prompt_resolution",
   "two rasters",                "different resolutions",                                    "aggregate(sum) then resample, totals checked",                  ".aggregate_pop",
+  "raster input",               "negative value(s) in the aligned table",                   "warn: undeclared fill sentinel or data error, never cleaned",   ".report_raster_fill",
   "skeleton + rasters",         "no coordinate key in common",                              "stop: the two grids are different",                             ".check_grid_match",
   "skeleton + rasters",         "partial overlap",                                          "warn with the number of unmatched keys",                        ".check_grid_match",
   "calc_fild is a vector map",  "always",                                                   "the grid comes from the exposure, the map labels it",           ".prepare_inputs",
@@ -516,6 +521,27 @@
   # ── 2. spatial alignment of the raster inputs ──────────────────────
   spatial <- .align_raster_inputs(conc_real, pop_total, conc_cf, scenario,
                                   target_res, dgt_coord, template = template)
+
+  # ── 2b. undeclared fill values the reader could not know about ─────
+  # terra maps a *declared* missing-value flag (`_FillValue`, `missing_value`,
+  # `NAflag`) to NA while reading, so a negative number that survives into the
+  # aligned table was never declared missing -- in gridded products that is
+  # usually an undeclared no-data code such as -999. Reported here, before
+  # anything is computed, and never cleaned: dropping or rescaling those cells
+  # is a data-contract decision (it decides which cells the analysis covers and
+  # what every total means), so the run makes it visible and the user decides.
+  # `validate = "off"` is the documented silence mode and silences this too.
+  if (validate != "off") {
+    if (conc_raster) {
+      .report_raster_fill(spatial$conc_real, "conc_real")
+    }
+    if (pop_raster) {
+      .report_raster_fill(spatial$pop_total, "pop_total")
+    }
+    if (.is_raster_input(conc_cf) && !is.null(spatial$conc_cf)) {
+      .report_raster_fill(spatial$conc_cf, "conc_cf")
+    }
+  }
 
   # ── 3. ingestion and column mapping ────────────────────────────────
   cols <- .map_input_columns(calc_fild, spatial$conc_real, spatial$pop_total,

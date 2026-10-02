@@ -74,11 +74,148 @@ raster_to_grid <- function(path, band_names = NULL, dgt = 2) {
   }
   grid <- filter(grid, n_na == 0)
 
-  # round and coerce coordinates to character (matchable-compatible)
-  grid$x <- matchable(grid$x, dgt = dgt)
-  grid$y <- matchable(grid$y, dgt = dgt)
+  # round and coerce coordinates to character (matchable-compatible). A grid
+  # finer than `dgt` can express loses cells right here: two distinct cell
+  # centres render to one key, and the collapse only shows up much later. The
+  # rendering and the report of it belong together, so both are in
+  # `.render_cell_keys()`.
+  keys   <- .render_cell_keys(grid$x, grid$y, dgt = dgt, res = terra::res(r))
+  grid$x <- keys$x
+  grid$y <- keys$y
 
   grid
+}
+
+# Decimals a coordinate vector needs so that its distinct values stay distinct
+# as rendered keys. Searched upwards from the caller's `dgt` (never below it:
+# that is the user's floor) and bounded, so a pathological vector cannot make
+# the search unbounded.
+.min_key_digits <- function(v, dgt, max_extra = 6L) {
+  v <- unique(v)
+  if (length(v) < 2L) {
+    return(dgt)
+  }
+  for (d in seq.int(dgt, dgt + max_extra)) {
+    if (anyDuplicated(matchable(v, dgt = d)) == 0L) {
+      return(d)
+    }
+  }
+  NA_integer_
+}
+
+# Render raster cell centres as matchable() keys, reporting a `dgt` too coarse
+# to keep the grid's cells apart.
+#
+# Two distinct centres rendering to one key is not cosmetic: the grid skeleton
+# loses a cell and the value table fans out on the duplicated key, so the run
+# ends in a wrong total or a list-column result, far from the cause. The tabular
+# path reports the same condition in `.normalise_coord_keys()`, but a raster
+# reaches that check with its keys already rendered as character and is skipped,
+# so the test has to live where the rendering does.
+#
+# An axis is tested before the cells: rounding merges two cells only by merging
+# their centres, so one collapsed axis is enough to know the grid collapsed --
+# and a global 0.1 deg raster has 3600 + 1300 centres against 4.68e6 cells, so
+# the cheap test is the one that runs on every ingest. The cell-level count is
+# computed only once the axis test fires.
+.render_cell_keys <- function(x, y, dgt, res = NULL) {
+  raw    <- list(x = x, y = y)
+  keys   <- map(raw, matchable, dgt = dgt)
+  needed <- map_int(raw, .min_key_digits, dgt = dgt)
+
+  if (!any(is.na(needed) | needed > dgt)) {
+    return(keys)
+  }
+
+  n_cells <- length(x)
+  n_keys  <- length(unique(paste(keys$x, keys$y, sep = "\r")))
+  axis_txt <- paste0(
+    map_chr(names(raw), function(nm) {
+      sprintf("%s: %d centre(s) -> %d key(s)",
+              nm, length(unique(raw[[nm]])), length(unique(keys[[nm]])))
+    }),
+    collapse = "; "
+  )
+  res_txt <- if (is.null(res)) "" else paste0(" on a ", .fmt_res(res), " deg grid")
+  fix_dgt <- suppressWarnings(
+    min(needed[is.na(needed) | needed > dgt], na.rm = TRUE)
+  )
+  fix <- if (is.finite(fix_dgt)) {
+    paste0("Set `dgt_coord = ", fix_dgt, "` to keep this grid apart.")
+  } else {
+    "Even six more decimals do not separate the cell centres."
+  }
+
+  cli::cli_warn(str_c(
+    "Rounding cell centres to `dgt = {dgt}` decimal place(s) merges raster cells",
+    "{res_txt}: {format(n_cells, big.mark = \",\")} cell(s) collapse into ",
+    "{format(n_keys, big.mark = \",\")} coordinate key(s) ({axis_txt}). The ",
+    "analysis grid would lose {format(n_cells - n_keys, big.mark = \",\")} cell(s) ",
+    "and the value table would fan out on the duplicated key, which surfaces as a ",
+    "wrong total or a list-column result rather than as an error here. {fix}"
+  ))
+
+  keys
+}
+
+# Negative values in a table a raster was ingested into.
+#
+# Concentrations and populations are non-negative quantities, and terra maps a
+# *declared* missing-value flag (`_FillValue`, `missing_value`, `NAflag`) to NA
+# while reading, so a negative number that reaches this point was never declared
+# missing. Gridded products routinely spell no-data as -999 without declaring
+# it, and `raster_to_grid()` keeps every non-NA cell, so those values enter the
+# analysis table as if they were measurements.
+#
+# The report is diagnostic only. Nothing is dropped, rescaled or converted to
+# NA, because making a sentinel mean "missing" is a data-contract decision: it
+# decides which cells the analysis covers and what every total means. The
+# caller passes `quiet = TRUE` for `validate = "off"`, the documented silence
+# mode.
+#
+# Returns its counts invisibly, so a test can assert on the numbers instead of
+# on the wording.
+.report_raster_fill <- function(data, label, quiet = FALSE) {
+  if (!is.data.frame(data) || nrow(data) == 0L) {
+    return(invisible(NULL))
+  }
+  value_cols <- setdiff(names(data), c("x", "y"))
+  if (length(value_cols) == 0L) {
+    return(invisible(NULL))
+  }
+
+  vals   <- suppressWarnings(as.numeric(unlist(data[value_cols], use.names = FALSE)))
+  neg    <- vals[!is.na(vals) & vals < 0]
+  report <- list(label = label, n_value = length(vals), n_neg = length(neg),
+                 n_cells = nrow(data))
+  if (length(neg) == 0L) {
+    return(invisible(report))
+  }
+
+  counts <- sort(table(round(neg, 6L)), decreasing = TRUE)
+  top    <- utils::head(counts, 3L)
+  top_txt <- paste0(
+    sprintf("%s x %s",
+            format(as.numeric(names(top)), trim = TRUE, scientific = FALSE),
+            format(as.integer(top), big.mark = ",")),
+    collapse = ", "
+  )
+  report$top <- top
+
+  if (!quiet) {
+    cli::cli_warn(str_c(
+      "`{label}`: {format(length(neg), big.mark = \",\")} of ",
+      "{format(length(vals), big.mark = \",\")} raster value(s) are negative ",
+      "(most frequent: {top_txt}). A raster reader maps a declared missing-value ",
+      "flag to NA, so these were not declared missing: they are data errors or an ",
+      "undeclared fill/no-data sentinel. Nothing is dropped, rescaled or converted ",
+      "to NA here, and the values enter the analysis as they are. If this is a fill ",
+      "code, declare it in the file (`_FillValue` / `missing_value` / `NAflag`) or ",
+      "set it to NA before running: the package does not clean sentinels for you."
+    ))
+  }
+
+  invisible(report)
 }
 
 # Aggregate a count raster onto a coarser template without losing totals.

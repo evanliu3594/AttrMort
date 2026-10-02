@@ -206,6 +206,32 @@
   onto its cells -- so the relationship is declared instead of left to dplyr.
   No number changes; a calibrated run's output is just clean again.
 
+### Ingest quality on real raster data (261002)
+
+Found by running the ingest layer against two real gridded products (a 0.1 deg
+netCDF exposure whose no-data cells are an *undeclared* `-999`, and a 30
+arc-sec population GeoTIFF); see `diagnosis/validate_raster_ingest_261002.md`.
+
+* A raster whose missing cells are an undeclared fill value (a `-999` with no
+  `_FillValue` / `missing_value` / `NAflag`) now says so while it is read.
+  terra maps a *declared* flag to NA, so a negative number that survives into
+  the ingested table was never declared missing; `conc_real` / `pop_total` /
+  `conc_cf` are reported with the count, the number of cells and the most
+  frequent negative value, and the report names the two ways out (declare the
+  flag in the file, or convert the value to NA). Nothing is dropped, rescaled
+  or converted: making a sentinel mean "missing" decides which cells the
+  analysis covers and what every total means, which is the user's call.
+  `validate = "off"` still says nothing at all, as it does for every other
+  report.
+* `raster_to_grid()` reports a `dgt_coord` too coarse for the raster: cell
+  centres that round to one coordinate key cost cells silently (a 0.01 deg
+  grid, about 1.1 km, with the default `dgt_coord = 2` keeps only 5,037 of
+  10,000 cells). The warning gives the collapsed cell and key counts and the
+  number of decimals that would keep the grid apart. The tabular path has
+  warned about the same condition all along, in `.normalise_coord_keys()`;
+  a raster reached that check with its keys already rendered as character and
+  was skipped. No cells are dropped by the new report, and no value changes.
+
 ## New features
 
 * `mortality()` accepts a raster-only call: when `conc_real` is a raster (a
