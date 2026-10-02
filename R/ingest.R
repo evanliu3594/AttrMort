@@ -106,7 +106,7 @@
 .ingest_and_map <- function(x, schema, dgt_coord = 2, label = NULL) {
   data <- .ingest_single_input(x, dgt_coord)
 
-  mapping <- detect_columns(df, schema = schema, quiet = TRUE)
+  mapping <- detect_columns(data, schema = schema, quiet = TRUE)
   if (length(mapping) > 0) {
     # detect_columns() returns c(semantic = "<actual column>"); the pipeline
     # expects the canonical names (.COLUMN_TARGET), so rename actual ->

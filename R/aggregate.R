@@ -602,9 +602,9 @@ aggregate_ci <- function(x, calc_fild = NULL, at = "location", by = "total") {
 #' @param domain Domain columns required by the aggregation.
 #' @return `result`, with the missing domain columns added from `calc_fild`.
 #' @noRd
-.join_calc_fild <- function(df, calc_fild, domain) {
-  if (is.null(calc_fild) || all(domain %in% names(df))) {
-    return(df)
+.join_calc_fild <- function(result, calc_fild, domain) {
+  if (is.null(calc_fild) || all(domain %in% names(result))) {
+    return(result)
   }
   if (!is.data.frame(calc_fild)) {
     .abort("`calc_fild` must be a data.frame or NULL.")

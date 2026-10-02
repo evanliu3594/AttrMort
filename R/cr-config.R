@@ -78,6 +78,13 @@
   if (length(v) == 0) {
     .cr_field_error(field, "ages must not be empty")
   }
+  if (length(v) > .MAX_CR_AGES) {
+    .abort(str_c(
+      "The CR configuration lists ", length(v), " age groups for `", field,
+      "`, more than the ", .MAX_CR_AGES, " allowed. Check the `ages` field ",
+      "of the model."
+    ))
+  }
   a <- suppressWarnings(as.numeric(v))
   if (anyNA(a)) {
     .cr_field_error(field, "ages must all be numeric")
@@ -353,13 +360,6 @@ cr_models <- function(config = NULL) {
   out
 }
 
-#' @export
-print.attr_cr_config <- function(x, ...) {
-  cat("<attr_cr_config> schema ", x$schema_version, ", ",
-      length(x$models), " model(s): ", paste(names(x$models), collapse = ", "),
-      "\n", sep = "")
-  cat("config: ", x$path, "\n", sep = "")
-  invisible(x)
 #' Print a concentration-response model configuration
 #'
 #' Shows the schema version, the number of models and where the configuration
@@ -369,6 +369,13 @@ print.attr_cr_config <- function(x, ...) {
 #' @param ... Ignored, for compatibility with the `print()` generic.
 #'
 #' @return `x`, invisibly.
-}
+#' @export
 #' @examples
 #' print(cr_config())
+print.attr_cr_config <- function(x, ...) {
+  cat("<attr_cr_config> schema ", x$schema_version, ", ",
+      length(x$models), " model(s): ", paste(names(x$models), collapse = ", "),
+      "\n", sep = "")
+  cat("config: ", x$path, "\n", sep = "")
+  invisible(x)
+}

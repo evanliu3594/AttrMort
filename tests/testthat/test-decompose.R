@@ -15,7 +15,22 @@
   s
 }
 
-# Run Decomposition() quietly (it prints its summary with cat()) and return
+# The two groups decompose() compares: each is a complete set of inputs for
+# one scenario, as lists of single-value tables.
+.attr_groups <- function(d, from = "base2015", to = "SSP1_2030") {
+  group <- function(sc) {
+    list(
+      label     = sc,
+      conc_real = .slice_conc(d$conc_real, sc),
+      pop_total = .slice_pop(d$pop_total, sc),
+      age_struc = .slice_age(d$age_struc, sc, min_age_groups = 0),
+      mort_rate = .slice_mort(d$mort_rate, sc)
+    )
+  }
+  list(from = group(from), to = group(to))
+}
+
+# Run decompose() quietly (it prints its summary with cat()) and return
 # the data.frame.
 .decomp_all <- function(d, groups = .attr_groups(d)) {
   out <- NULL
@@ -190,21 +205,6 @@ describe("decompose() on the small fixture", {
     expect_equal(out$ORF, orf - exp_)
   })
 
-  it("telescopes to the total change and keeps it across orderings", {
-    d <- .attr_two_scenario()
-    a <- .decomp_run(1, d)
-    b <- .decomp_run(24, d)
-
-    expect_equal(a$Start, b$Start)
-    expect_equal(a$End,   b$End)
-    expect_equal(a$PG + a$PA + a$EXP + a$ORF, a$End - a$Start)
-    expect_equal(b$PG + b$PA + b$EXP + b$ORF, b$End - b$Start)
-
-    # The ordering is what changes one driver's contribution: the same total
-    # change is split differently.
-    expect_false(isTRUE(all.equal(a$PG, b$PG)))
-  })
-
   it("isolates each step in the driver that moved, for every ordering", {
     # Every column is the difference between two consecutive prefixes of the
     # ordering, so a step may only move the driver it is named after (and PA
@@ -248,6 +248,21 @@ describe("decompose() on the small fixture", {
     }
   })
 
+  it("telescopes to the total change and keeps it across orderings", {
+    d <- .attr_two_scenario()
+    a <- .decomp_run(1, d)
+    b <- .decomp_run(24, d)
+
+    expect_equal(a$Start, b$Start)
+    expect_equal(a$End,   b$End)
+    expect_equal(a$PG + a$PA + a$EXP + a$ORF, a$End - a$Start)
+    expect_equal(b$PG + b$PA + b$EXP + b$ORF, b$End - b$Start)
+
+    # The ordering is what changes one driver's contribution: the same total
+    # change is split differently.
+    expect_false(isTRUE(all.equal(a$PG, b$PG)))
+  })
+
   it("keeps the CI branch it was given", {
     d      <- .attr_two_scenario()
     groups <- .attr_groups(d)
@@ -259,9 +274,9 @@ describe("decompose() on the small fixture", {
       ))
     ))
     mean_ <- .decomp_run(1, d)
+    low   <- low[[1]]
 
     expect_equal(nrow(low), 8L)
     expect_false(isTRUE(all.equal(sum(low$End), sum(mean_$End))))
   })
 })
-    low   <- low[[1]]
